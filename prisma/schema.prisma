@@ -1,0 +1,383 @@
+// StudyBuddy - Prisma Schema
+// EdTech App with AI-powered study tools and gamification
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==================== USER & AUTH ====================
+
+model User {
+  id            String    @id @default(cuid())
+  clerkId       String    @unique
+  email         String    @unique
+  username      String    @unique
+  displayName   String?
+  avatarUrl     String?
+
+  // Avatar customization (JSON with equipped items)
+  avatar        Json      @default("{}")
+
+  // Gamification stats
+  level         Int       @default(1)
+  totalXp       Int       @default(0)
+  coins         Int       @default(100) // Start with some coins
+
+  // Streak tracking
+  currentStreak   Int       @default(0)
+  longestStreak   Int       @default(0)
+  lastStudyDate   DateTime?
+  streakFreezes   Int       @default(0)
+
+  // League info
+  currentLeague   LeagueTier @default(BRONZE)
+
+  // Premium status
+  isPremium       Boolean   @default(false)
+  premiumUntil    DateTime?
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  documents         Document[]
+  subjects          Subject[]
+  studySessions     StudySession[]
+  userAchievements  UserAchievement[]
+  inventory         UserInventory[]
+
+  // Social relations
+  sentFriendRequests      Friendship[] @relation("FriendshipSender")
+  receivedFriendRequests  Friendship[] @relation("FriendshipReceiver")
+  leagueParticipations    LeagueParticipant[]
+
+  @@index([clerkId])
+  @@index([email])
+}
+
+// ==================== CONTENT ====================
+
+model Subject {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  color       String   @default("#6366f1") // Indigo default
+  icon        String   @default("book")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents   Document[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model Document {
+  id                String            @id @default(cuid())
+  userId            String
+  subjectId         String?
+
+  title             String
+  description       String?
+  originalFileUrl   String?
+  extractedText     String?           @db.Text
+
+  // Processing status
+  processingStatus  ProcessingStatus  @default(PENDING)
+  processingError   String?
+
+  // AI generation status
+  flashcardsGenerated Boolean @default(false)
+  questionsGenerated  Boolean @default(false)
+
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject           Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  flashcards        Flashcard[]
+  questions         Question[]
+  studySessions     StudySession[]
+
+  @@index([userId])
+  @@index([subjectId])
+  @@index([processingStatus])
+}
+
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+// ==================== STUDY CONTENT ====================
+
+model Flashcard {
+  id            String     @id @default(cuid())
+  documentId    String
+
+  front         String     @db.Text
+  back          String     @db.Text
+
+  // Difficulty for initial categorization
+  difficulty    Difficulty @default(MEDIUM)
+
+  // Spaced repetition (SM-2 algorithm)
+  easeFactor    Float      @default(2.5)
+  interval      Int        @default(0)  // Days until next review
+  repetitions   Int        @default(0)
+  nextReviewAt  DateTime?
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  document      Document   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([nextReviewAt])
+}
+
+model Question {
+  id            String       @id @default(cuid())
+  documentId    String
+
+  type          QuestionType
+  question      String       @db.Text
+  correctAnswer String       @db.Text
+
+  // For multiple choice questions
+  options       Json?        // Array of option strings
+
+  // For explanation after answer
+  explanation   String?      @db.Text
+
+  createdAt     DateTime     @default(now())
+
+  document      Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([type])
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+  OPEN_ENDED
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+// ==================== STUDY SESSIONS ====================
+
+model StudySession {
+  id              String      @id @default(cuid())
+  userId          String
+  documentId      String
+
+  mode            StudyMode
+
+  // Results
+  correctAnswers  Int         @default(0)
+  totalQuestions  Int         @default(0)
+
+  // Rewards
+  xpEarned        Int         @default(0)
+  coinsEarned     Int         @default(0)
+
+  // Timing
+  durationSeconds Int         @default(0)
+
+  startedAt       DateTime    @default(now())
+  completedAt     DateTime?
+
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document        Document    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([documentId])
+  @@index([completedAt])
+}
+
+enum StudyMode {
+  FLASHCARDS
+  QUIZ
+  TRUE_FALSE
+  TUTOR
+  EXAM_SIMULATION
+}
+
+// ==================== GAMIFICATION ====================
+
+model Achievement {
+  id              String    @id @default(cuid())
+  code            String    @unique
+  name            String
+  description     String
+  iconUrl         String?
+
+  // Requirement to unlock (JSON)
+  // Example: { "type": "streak", "value": 7 }
+  // Example: { "type": "sessions", "value": 100 }
+  requirement     Json
+
+  // Rewards
+  rewardCoins     Int       @default(0)
+  rewardXp        Int       @default(0)
+
+  // Rarity for display
+  rarity          AchievementRarity @default(COMMON)
+
+  userAchievements UserAchievement[]
+}
+
+enum AchievementRarity {
+  COMMON
+  RARE
+  EPIC
+  LEGENDARY
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  achievementId String
+
+  unlockedAt    DateTime    @default(now())
+
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+}
+
+// ==================== SHOP ====================
+
+model ShopItem {
+  id              String        @id @default(cuid())
+  category        ShopCategory
+
+  name            String
+  description     String?
+  imageUrl        String?
+  price           Int
+
+  // Restrictions
+  isPremiumOnly   Boolean       @default(false)
+  isLimited       Boolean       @default(false)
+  availableUntil  DateTime?
+
+  // Item properties (JSON)
+  // For avatars: { "slot": "hat", "colors": ["#fff", "#000"] }
+  properties      Json          @default("{}")
+
+  createdAt       DateTime      @default(now())
+
+  inventory       UserInventory[]
+}
+
+enum ShopCategory {
+  AVATAR_HEAD
+  AVATAR_BODY
+  AVATAR_ACCESSORY
+  AVATAR_BACKGROUND
+  THEME
+  POWERUP
+}
+
+model UserInventory {
+  id          String    @id @default(cuid())
+  userId      String
+  itemId      String
+
+  purchasedAt DateTime  @default(now())
+  isEquipped  Boolean   @default(false)
+
+  // For consumables
+  quantity    Int       @default(1)
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item        ShopItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, itemId])
+  @@index([userId])
+}
+
+// ==================== SOCIAL ====================
+
+model Friendship {
+  id          String           @id @default(cuid())
+  senderId    String
+  receiverId  String
+  status      FriendshipStatus @default(PENDING)
+
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  sender      User             @relation("FriendshipSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver    User             @relation("FriendshipReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@index([senderId])
+  @@index([receiverId])
+}
+
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  BLOCKED
+}
+
+// ==================== LEAGUES ====================
+
+model League {
+  id            String      @id @default(cuid())
+  tier          LeagueTier
+
+  weekStartDate DateTime
+  weekEndDate   DateTime
+
+  // League is automatically created weekly
+  createdAt     DateTime    @default(now())
+
+  participants  LeagueParticipant[]
+
+  @@index([tier, weekStartDate])
+}
+
+enum LeagueTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  DIAMOND
+  RUBY
+}
+
+model LeagueParticipant {
+  id          String   @id @default(cuid())
+  leagueId    String
+  userId      String
+
+  weeklyXp    Int      @default(0)
+  position    Int      @default(0)
+
+  league      League   @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([leagueId, userId])
+  @@index([leagueId])
+  @@index([userId])
+}

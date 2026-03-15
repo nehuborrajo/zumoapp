@@ -1,36 +1,131 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# StudyBuddy
 
-## Getting Started
+App EdTech tipo "Duolingo para estudiar cualquier materia" donde el usuario sube su propio contenido y la IA genera flashcards, quizzes, y modos de estudio, con gamificación social.
 
-First, run the development server:
+## Stack Tecnológico
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Frontend:** Next.js 14+, TypeScript, Tailwind CSS, Framer Motion
+- **State Management:** Zustand
+- **Database:** PostgreSQL + Prisma ORM
+- **Authentication:** Clerk
+- **AI:** OpenAI (GPT-4o-mini / GPT-4o)
+- **File Storage:** Cloudflare R2
+- **OCR:** Google Cloud Vision
+
+## Estructura del Proyecto
+
+```
+src/
+├── app/
+│   ├── (auth)/           # Páginas de autenticación
+│   │   ├── sign-in/
+│   │   └── sign-up/
+│   ├── (dashboard)/      # Páginas del dashboard (protegidas)
+│   │   ├── dashboard/
+│   │   ├── documents/
+│   │   ├── study/
+│   │   ├── leaderboard/
+│   │   ├── shop/
+│   │   └── profile/
+│   ├── api/              # API Routes
+│   └── page.tsx          # Landing page
+├── components/
+│   ├── ui/               # Componentes UI reutilizables
+│   └── layout/           # Componentes de layout
+├── lib/
+│   ├── prisma.ts         # Cliente de Prisma
+│   └── utils.ts          # Utilidades
+└── store/
+    └── user-store.ts     # Zustand store
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Configuración
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Clonar el repositorio
+2. Instalar dependencias:
+   ```bash
+   npm install
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. Copiar `.env.example` a `.env` y configurar las variables:
+   ```bash
+   cp .env.example .env
+   ```
 
-## Learn More
+4. Configurar las siguientes variables de entorno:
+   - `DATABASE_URL` - URL de PostgreSQL
+   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` - Clerk publishable key
+   - `CLERK_SECRET_KEY` - Clerk secret key
+   - `OPENAI_API_KEY` - API key de OpenAI
 
-To learn more about Next.js, take a look at the following resources:
+5. Generar el cliente de Prisma:
+   ```bash
+   npx prisma generate
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+6. Ejecutar migraciones (cuando tengas la DB):
+   ```bash
+   npx prisma migrate dev
+   ```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+7. Iniciar el servidor de desarrollo:
+   ```bash
+   npm run dev
+   ```
 
-## Deploy on Vercel
+## Páginas Implementadas
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **/** - Landing page con información del producto
+- **/sign-in** - Inicio de sesión con Clerk
+- **/sign-up** - Registro con Clerk
+- **/dashboard** - Dashboard principal con estadísticas y documentos recientes
+- **/documents** - Gestión de documentos con upload
+- **/study** - Modos de estudio (flashcards, quiz, V/F)
+- **/leaderboard** - Ligas semanales y ranking de amigos
+- **/shop** - Tienda de items para avatar y power-ups
+- **/profile** - Perfil con logros, estadísticas y rachas
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Funcionalidades (MVP - Fase 1)
+
+- [x] Landing page
+- [x] Autenticación con Clerk
+- [x] Dashboard con estadísticas
+- [x] Gestión de documentos (UI)
+- [x] Modos de estudio (UI con flashcards funcionales)
+- [x] Sistema de gamificación (XP, niveles, rachas, monedas)
+- [x] Ligas semanales (UI)
+- [x] Tienda de items (UI)
+- [x] Perfil con logros (UI)
+- [ ] Upload real de documentos a R2
+- [ ] Procesamiento con OCR (Google Vision)
+- [ ] Generación de contenido con IA (OpenAI)
+- [ ] API endpoints funcionales
+- [ ] Persistencia en base de datos
+
+## Próximos Pasos
+
+1. Configurar Clerk en producción
+2. Configurar PostgreSQL (Railway/Render)
+3. Implementar API de upload de documentos
+4. Integrar OpenAI para generación de contenido
+5. Conectar el frontend con las APIs
+
+## Desarrollo
+
+```bash
+# Desarrollo
+npm run dev
+
+# Build
+npm run build
+
+# Lint
+npm run lint
+
+# Prisma Studio (para ver la DB)
+npx prisma studio
+```
+
+## Licencia
+
+Privado - Todos los derechos reservados
