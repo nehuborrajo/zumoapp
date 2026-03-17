@@ -76,7 +76,7 @@ export default function LandingPage() {
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600">
               <BookOpen className="h-5 w-5 text-white" />
             </div>
-            <span className="text-xl font-bold">StudyBuddy</span>
+            <span className="text-xl font-bold">Zumo</span>
           </Link>
 
           <div className="hidden items-center gap-8 md:flex">
@@ -582,7 +582,7 @@ export default function LandingPage() {
               ¿Listo para estudiar de forma inteligente?
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-lg text-white/80">
-              Únete a miles de estudiantes que ya mejoraron sus notas con StudyBuddy.
+              Únete a miles de estudiantes que ya mejoraron sus notas con Zumo.
             </p>
             <Link href="/sign-up">
               <Button
@@ -606,7 +606,7 @@ export default function LandingPage() {
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600">
                 <BookOpen className="h-4 w-4 text-white" />
               </div>
-              <span className="font-bold">StudyBuddy</span>
+              <span className="font-bold">Zumo</span>
             </div>
             <div className="flex gap-6 text-sm text-gray-600 dark:text-gray-400">
               <Link href="/privacy" className="hover:text-gray-900 dark:hover:text-white">
@@ -620,7 +620,7 @@ export default function LandingPage() {
               </Link>
             </div>
             <p className="text-sm text-gray-500">
-              © 2024 StudyBuddy. Todos los derechos reservados.
+              © 2024 Zumo. Todos los derechos reservados.
             </p>
           </div>
         </div>

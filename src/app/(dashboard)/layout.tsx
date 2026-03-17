@@ -1,16 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { UserButton, useUser } from "@clerk/nextjs";
+import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { Badge, Progress } from "@/components/ui";
+import { Badge, Progress, Button } from "@/components/ui";
+import { UserProvider, useUser } from "@/contexts/UserContext";
 import {
   BookOpen,
   Home,
-  FileText,
+  Folder,
   GraduationCap,
   Trophy,
   ShoppingBag,
@@ -21,37 +21,69 @@ import {
   Coins,
   Star,
   Crown,
+  LogOut,
+  Loader2,
 } from "lucide-react";
 
 const navigation = [
   { name: "Inicio", href: "/dashboard", icon: Home },
-  { name: "Mis Documentos", href: "/documents", icon: FileText },
+  { name: "Mis Cursos", href: "/containers", icon: Folder },
   { name: "Estudiar", href: "/study", icon: GraduationCap },
   { name: "Clasificación", href: "/leaderboard", icon: Trophy },
   { name: "Tienda", href: "/shop", icon: ShoppingBag },
   { name: "Perfil", href: "/profile", icon: User },
 ];
 
-// Mock user stats (will come from API/store later)
-const mockStats = {
-  level: 12,
-  totalXp: 1250,
-  xpForNextLevel: 1600,
-  coins: 340,
-  currentStreak: 7,
-  isPremium: false,
-};
-
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const pathname = usePathname();
-  const { user } = useUser();
+  return (
+    <UserProvider>
+      <DashboardContent>{children}</DashboardContent>
+    </UserProvider>
+  );
+}
 
-  const xpProgress = (mockStats.totalXp / mockStats.xpForNextLevel) * 100;
+function DashboardContent({ children }: { children: React.ReactNode }) {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [supabaseUser, setSupabaseUser] = useState<any>(null);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [supabase, setSupabase] = useState<any>(null);
+  const pathname = usePathname();
+  const router = useRouter();
+
+  // Get user data from our database
+  const { user, loading: userLoading, xpProgress, xpNeededForLevel, xpInCurrentLevel } = useUser();
+
+  useEffect(() => {
+    const loadSupabase = async () => {
+      const { createClient } = await import("@/lib/supabase/client");
+      const client = createClient();
+      setSupabase(client);
+      const { data: { user } } = await client.auth.getUser();
+      setSupabaseUser(user);
+    };
+    loadSupabase();
+  }, []);
+
+  const handleSignOut = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+      router.push("/");
+      router.refresh();
+    }
+  };
+
+  // Use real user data or defaults
+  const stats = {
+    level: user?.level ?? 1,
+    totalXp: user?.totalXp ?? 0,
+    coins: user?.coins ?? 100,
+    currentStreak: user?.currentStreak ?? 0,
+    isPremium: user?.isPremium ?? false,
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
@@ -82,7 +114,7 @@ export default function DashboardLayout({
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600">
                 <BookOpen className="h-5 w-5 text-white" />
               </div>
-              <span className="text-xl font-bold">StudyBuddy</span>
+              <span className="text-xl font-bold">Zumo</span>
             </Link>
             <button
               className="rounded-lg p-2 hover:bg-gray-100 dark:hover:bg-gray-800 lg:hidden"
@@ -98,14 +130,14 @@ export default function DashboardLayout({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-lg font-bold">
-                    {mockStats.level}
+                    {userLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : stats.level}
                   </div>
                   <div>
                     <p className="text-sm font-medium text-white/80">Nivel</p>
-                    <p className="font-bold">{mockStats.totalXp} XP</p>
+                    <p className="font-bold">{stats.totalXp} XP</p>
                   </div>
                 </div>
-                {mockStats.isPremium && (
+                {stats.isPremium && (
                   <Badge variant="premium" size="sm">
                     <Crown className="h-3 w-3" />
                     PRO
@@ -120,7 +152,7 @@ export default function DashboardLayout({
                   className="bg-white/20"
                 />
                 <p className="mt-1 text-xs text-white/70">
-                  {mockStats.xpForNextLevel - mockStats.totalXp} XP para nivel {mockStats.level + 1}
+                  {xpInCurrentLevel} / {xpNeededForLevel} XP para nivel {stats.level + 1}
                 </p>
               </div>
             </div>
@@ -131,7 +163,7 @@ export default function DashboardLayout({
                 <Flame className="h-5 w-5 text-orange-500" />
                 <div>
                   <p className="text-lg font-bold text-orange-600 dark:text-orange-400">
-                    {mockStats.currentStreak}
+                    {stats.currentStreak}
                   </p>
                   <p className="text-xs text-gray-500">Racha</p>
                 </div>
@@ -140,7 +172,7 @@ export default function DashboardLayout({
                 <Coins className="h-5 w-5 text-yellow-500" />
                 <div>
                   <p className="text-lg font-bold text-yellow-600 dark:text-yellow-400">
-                    {mockStats.coins}
+                    {stats.coins}
                   </p>
                   <p className="text-xs text-gray-500">Monedas</p>
                 </div>
@@ -178,7 +210,7 @@ export default function DashboardLayout({
           </nav>
 
           {/* Premium upsell */}
-          {!mockStats.isPremium && (
+          {!stats.isPremium && (
             <div className="border-t border-gray-200 p-4 dark:border-gray-800">
               <div className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 p-4 text-white">
                 <div className="flex items-center gap-2">
@@ -222,26 +254,60 @@ export default function DashboardLayout({
             <div className="hidden items-center gap-4 md:flex">
               <div className="flex items-center gap-1.5">
                 <Star className="h-4 w-4 text-purple-500" />
-                <span className="text-sm font-medium">{mockStats.totalXp} XP</span>
+                <span className="text-sm font-medium">{stats.totalXp} XP</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <Flame className="h-4 w-4 text-orange-500" />
-                <span className="text-sm font-medium">{mockStats.currentStreak}</span>
+                <span className="text-sm font-medium">{stats.currentStreak}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <Coins className="h-4 w-4 text-yellow-500" />
-                <span className="text-sm font-medium">{mockStats.coins}</span>
+                <span className="text-sm font-medium">{stats.coins}</span>
               </div>
             </div>
 
-            {/* User button */}
-            <UserButton
-              appearance={{
-                elements: {
-                  avatarBox: "h-9 w-9",
-                },
-              }}
-            />
+            {/* User menu */}
+            <div className="relative">
+              <button
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-sm font-bold"
+              >
+                {user?.displayName?.charAt(0).toUpperCase() ||
+                 supabaseUser?.email?.charAt(0).toUpperCase() || "U"}
+              </button>
+
+              {showUserMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowUserMenu(false)}
+                  />
+                  <div className="absolute right-0 top-12 z-50 w-64 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                    <div className="border-b border-gray-100 px-3 py-2 dark:border-gray-800">
+                      <p className="text-sm font-medium">{user?.displayName || "Usuario"}</p>
+                      <p className="text-xs text-gray-500">{user?.email || supabaseUser?.email}</p>
+                    </div>
+                    <div className="pt-2">
+                      <Link
+                        href="/profile"
+                        onClick={() => setShowUserMenu(false)}
+                        className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+                      >
+                        <User className="h-4 w-4" />
+                        Mi perfil
+                      </Link>
+                      <button
+                        onClick={handleSignOut}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Cerrar sesión
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
 

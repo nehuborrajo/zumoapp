@@ -1,7 +1,7 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { useUser } from "@clerk/nextjs";
 import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Progress } from "@/components/ui";
 import {
   User,
@@ -17,52 +17,136 @@ import {
   Crown,
   Share2,
   Clock,
+  Loader2,
 } from "lucide-react";
 import { formatNumber, leagueTierColors } from "@/lib/utils";
+import { userAPI, studySessionsAPI, type User as UserType, type StudySession } from "@/lib/api";
 
-// Mock user data
-const userData = {
-  level: 12,
-  totalXp: 4850,
-  xpForNextLevel: 5625,
-  coins: 340,
-  currentStreak: 7,
-  longestStreak: 15,
-  currentLeague: "GOLD",
-  isPremium: false,
-  totalStudyTime: 4520, // minutes
-  totalFlashcards: 487,
-  totalSessions: 89,
-  accuracy: 92,
-  joinedAt: "2024-01-01",
-};
+interface Achievement {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  rarity: string;
+  unlockedAt: string | null;
+}
 
-const achievements = [
-  { id: "1", name: "Primera sesión", description: "Completa tu primera sesión de estudio", icon: "🎯", unlocked: true, unlockedAt: "2024-01-01" },
-  { id: "2", name: "Racha de 7 días", description: "Mantén una racha de 7 días consecutivos", icon: "🔥", unlocked: true, unlockedAt: "2024-01-08" },
-  { id: "3", name: "100 flashcards", description: "Estudia 100 flashcards", icon: "📚", unlocked: true, unlockedAt: "2024-01-10" },
-  { id: "4", name: "Perfeccionista", description: "Obtén 100% en una sesión de 20+ preguntas", icon: "💯", unlocked: true, unlockedAt: "2024-01-12" },
-  { id: "5", name: "Racha de 30 días", description: "Mantén una racha de 30 días", icon: "🏆", unlocked: false, progress: 23 },
-  { id: "6", name: "500 flashcards", description: "Estudia 500 flashcards", icon: "🎓", unlocked: false, progress: 97 },
-  { id: "7", name: "Liga Diamante", description: "Alcanza la liga Diamante", icon: "💎", unlocked: false, progress: 0 },
-  { id: "8", name: "Madrugador", description: "Estudia antes de las 7am", icon: "🌅", unlocked: false, progress: 0 },
-];
+// Calculate XP needed for a level
+function xpForLevel(level: number): number {
+  // Level 1: 0 XP, Level 2: 100 XP, Level 3: 250 XP, etc.
+  let total = 0;
+  for (let i = 1; i < level; i++) {
+    total += 50 * i * (i + 1) / 2;
+  }
+  return total;
+}
 
-const recentActivity = [
-  { type: "study", description: "Sesión de flashcards - Biología", xp: 45, time: "Hace 2 horas" },
-  { type: "achievement", description: "¡Logro desbloqueado: Perfeccionista!", xp: 100, time: "Hace 1 día" },
-  { type: "study", description: "Quiz - Historia de España", xp: 60, time: "Hace 1 día" },
-  { type: "streak", description: "¡Racha de 7 días alcanzada!", xp: 50, time: "Hace 2 días" },
-];
+function xpForNextLevel(level: number): number {
+  return xpForLevel(level + 1);
+}
 
 export default function ProfilePage() {
-  const { user } = useUser();
-  const leagueColors = leagueTierColors[userData.currentLeague];
+  const [userData, setUserData] = useState<UserType | null>(null);
+  const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [recentSessions, setRecentSessions] = useState<StudySession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const formatStudyTime = (minutes: number) => {
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        const [user, sessions] = await Promise.all([
+          userAPI.getMe(),
+          studySessionsAPI.getRecent(10),
+        ]);
+        setUserData(user);
+        setRecentSessions(sessions);
+
+        // Fetch achievements
+        const res = await fetch("/api/achievements");
+        if (res.ok) {
+          const data = await res.json();
+          setAchievements(data);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Error loading profile");
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+      </div>
+    );
+  }
+
+  if (error || !userData) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <p className="text-red-500">{error || "Error loading profile"}</p>
+      </div>
+    );
+  }
+
+  const leagueColors = leagueTierColors[userData.currentLeague] || leagueTierColors.BRONZE;
+  const leagueNames: Record<string, string> = {
+    BRONZE: "Bronce",
+    SILVER: "Plata",
+    GOLD: "Oro",
+    PLATINUM: "Platino",
+    DIAMOND: "Diamante",
+    RUBY: "Rubí",
+  };
+
+  const formatStudyTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
     if (hours < 1) return `${minutes}min`;
     return `${hours}h ${minutes % 60}min`;
+  };
+
+  const formatTimeAgo = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 60) return `Hace ${diffMins} min`;
+    if (diffHours < 24) return `Hace ${diffHours} horas`;
+    if (diffDays === 1) return "Ayer";
+    return `Hace ${diffDays} días`;
+  };
+
+  const displayName = userData.displayName || userData.username || "Usuario";
+  const username = userData.username || "usuario";
+  const currentLevelXp = xpForLevel(userData.level);
+  const nextLevelXp = xpForNextLevel(userData.level);
+  const xpProgress = userData.totalXp - currentLevelXp;
+  const xpNeeded = nextLevelXp - currentLevelXp;
+
+  // Calculate stats from sessions
+  const totalStudyTime = recentSessions.reduce((sum, s) => sum + s.durationSeconds, 0);
+  const totalQuestions = recentSessions.reduce((sum, s) => sum + s.totalQuestions, 0);
+  const totalCorrect = recentSessions.reduce((sum, s) => sum + s.correctAnswers, 0);
+  const avgAccuracy = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0;
+  const totalSessions = userData._count?.studySessions || recentSessions.length;
+
+  const unlockedAchievements = achievements.filter(a => a.unlockedAt);
+  const lockedAchievements = achievements.filter(a => !a.unlockedAt);
+
+  const rarityEmoji: Record<string, string> = {
+    COMMON: "🎯",
+    RARE: "💎",
+    EPIC: "🌟",
+    LEGENDARY: "👑",
   };
 
   return (
@@ -93,7 +177,11 @@ export default function ProfilePage() {
               {/* Avatar */}
               <div className="relative">
                 <div className="flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-5xl">
-                  🐼
+                  {userData.avatarUrl ? (
+                    <img src={userData.avatarUrl} alt="Avatar" className="h-full w-full rounded-full object-cover" />
+                  ) : (
+                    "🐼"
+                  )}
                 </div>
                 <button className="absolute -bottom-1 -right-1 rounded-full bg-white p-2 shadow-lg dark:bg-gray-800">
                   <Edit2 className="h-4 w-4 text-gray-500" />
@@ -106,7 +194,7 @@ export default function ProfilePage() {
               {/* User info */}
               <div className="flex-1 text-center sm:text-left">
                 <div className="flex items-center justify-center gap-2 sm:justify-start">
-                  <h2 className="text-2xl font-bold">{user?.fullName || "Usuario"}</h2>
+                  <h2 className="text-2xl font-bold">{displayName}</h2>
                   {userData.isPremium && (
                     <Badge variant="premium">
                       <Crown className="h-3 w-3" />
@@ -114,16 +202,16 @@ export default function ProfilePage() {
                     </Badge>
                   )}
                 </div>
-                <p className="text-gray-500">@{user?.username || "usuario"}</p>
+                <p className="text-gray-500">@{username}</p>
 
                 {/* Level progress */}
                 <div className="mt-4">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">Nivel {userData.level}</span>
-                    <span className="font-medium">{userData.totalXp} / {userData.xpForNextLevel} XP</span>
+                    <span className="font-medium">{xpProgress} / {xpNeeded} XP</span>
                   </div>
                   <Progress
-                    value={(userData.totalXp / userData.xpForNextLevel) * 100}
+                    value={(xpProgress / xpNeeded) * 100}
                     variant="xp"
                     className="mt-2"
                   />
@@ -142,7 +230,7 @@ export default function ProfilePage() {
                 <div className="text-center">
                   <div className={`flex items-center justify-center gap-1 ${leagueColors.text}`}>
                     <Trophy className="h-5 w-5" />
-                    <span className="text-lg font-bold">Oro</span>
+                    <span className="text-lg font-bold">{leagueNames[userData.currentLeague]}</span>
                   </div>
                   <p className="text-xs text-gray-500">Liga</p>
                 </div>
@@ -170,11 +258,11 @@ export default function ProfilePage() {
             <CardContent className="p-6">
               <div className="flex items-center gap-3">
                 <div className="rounded-xl bg-purple-100 p-3 dark:bg-purple-900/30">
-                  <Clock className="h-6 w-6 text-purple-500" />
+                  <Star className="h-6 w-6 text-purple-500" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{formatStudyTime(userData.totalStudyTime)}</p>
-                  <p className="text-sm text-gray-500">Tiempo estudiando</p>
+                  <p className="text-2xl font-bold">{formatNumber(userData.totalXp)}</p>
+                  <p className="text-sm text-gray-500">XP Total</p>
                 </div>
               </div>
             </CardContent>
@@ -190,11 +278,11 @@ export default function ProfilePage() {
             <CardContent className="p-6">
               <div className="flex items-center gap-3">
                 <div className="rounded-xl bg-blue-100 p-3 dark:bg-blue-900/30">
-                  <BookOpen className="h-6 w-6 text-blue-500" />
+                  <Clock className="h-6 w-6 text-blue-500" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{formatNumber(userData.totalFlashcards)}</p>
-                  <p className="text-sm text-gray-500">Flashcards estudiadas</p>
+                  <p className="text-2xl font-bold">{formatStudyTime(totalStudyTime)}</p>
+                  <p className="text-sm text-gray-500">Tiempo estudiando</p>
                 </div>
               </div>
             </CardContent>
@@ -213,7 +301,7 @@ export default function ProfilePage() {
                   <Target className="h-6 w-6 text-green-500" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{userData.accuracy}%</p>
+                  <p className="text-2xl font-bold">{avgAccuracy}%</p>
                   <p className="text-sm text-gray-500">Precisión promedio</p>
                 </div>
               </div>
@@ -233,7 +321,7 @@ export default function ProfilePage() {
                   <Calendar className="h-6 w-6 text-amber-500" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{userData.totalSessions}</p>
+                  <p className="text-2xl font-bold">{totalSessions}</p>
                   <p className="text-sm text-gray-500">Sesiones completadas</p>
                 </div>
               </div>
@@ -256,36 +344,38 @@ export default function ProfilePage() {
                 <Award className="h-5 w-5 text-amber-500" />
                 Logros
                 <Badge variant="default" className="ml-auto">
-                  {achievements.filter(a => a.unlocked).length}/{achievements.length}
+                  {unlockedAchievements.length}/{achievements.length}
                 </Badge>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-4 gap-3 sm:grid-cols-4">
-                {achievements.map((achievement) => (
-                  <div
-                    key={achievement.id}
-                    className={`relative flex flex-col items-center rounded-xl p-3 ${
-                      achievement.unlocked
-                        ? "bg-amber-50 dark:bg-amber-900/20"
-                        : "bg-gray-100 opacity-50 dark:bg-gray-800"
-                    }`}
-                    title={achievement.description}
-                  >
-                    <span className="text-3xl">{achievement.icon}</span>
-                    <span className="mt-1 text-center text-xs font-medium line-clamp-2">
-                      {achievement.name}
-                    </span>
-                    {!achievement.unlocked && achievement.progress !== undefined && achievement.progress > 0 && (
-                      <div className="absolute -bottom-1 left-1/2 -translate-x-1/2">
-                        <Badge variant="default" size="sm">
-                          {achievement.progress}%
+              {achievements.length === 0 ? (
+                <p className="text-center text-gray-500 py-4">Completa sesiones para desbloquear logros</p>
+              ) : (
+                <div className="grid grid-cols-4 gap-3">
+                  {[...unlockedAchievements, ...lockedAchievements].slice(0, 8).map((achievement) => (
+                    <div
+                      key={achievement.id}
+                      className={`relative flex flex-col items-center rounded-xl p-3 transition-all ${
+                        achievement.unlockedAt
+                          ? "bg-amber-50 dark:bg-amber-900/20"
+                          : "bg-gray-100 opacity-50 dark:bg-gray-800 grayscale"
+                      }`}
+                      title={achievement.description}
+                    >
+                      <span className="text-3xl">{rarityEmoji[achievement.rarity] || "🎯"}</span>
+                      <span className="mt-1 text-center text-xs font-medium line-clamp-2">
+                        {achievement.name}
+                      </span>
+                      {achievement.unlockedAt && (
+                        <Badge variant="success" size="sm" className="absolute -top-1 -right-1">
+                          ✓
                         </Badge>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </motion.div>
@@ -301,41 +391,38 @@ export default function ProfilePage() {
               <CardTitle>Actividad reciente</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {recentActivity.map((activity, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between rounded-lg border border-gray-100 p-3 dark:border-gray-800"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`rounded-lg p-2 ${
-                          activity.type === "study"
-                            ? "bg-blue-100 dark:bg-blue-900/30"
-                            : activity.type === "achievement"
-                            ? "bg-amber-100 dark:bg-amber-900/30"
-                            : "bg-orange-100 dark:bg-orange-900/30"
-                        }`}
-                      >
-                        {activity.type === "study" ? (
-                          <BookOpen className="h-4 w-4 text-blue-500" />
-                        ) : activity.type === "achievement" ? (
-                          <Trophy className="h-4 w-4 text-amber-500" />
-                        ) : (
-                          <Flame className="h-4 w-4 text-orange-500" />
-                        )}
+              {recentSessions.length === 0 ? (
+                <p className="text-center text-gray-500 py-4">Aún no hay actividad</p>
+              ) : (
+                <div className="space-y-4">
+                  {recentSessions.slice(0, 5).map((session) => (
+                    <div
+                      key={session.id}
+                      className="flex items-center justify-between rounded-lg border border-gray-100 p-3 dark:border-gray-800"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="rounded-lg p-2"
+                          style={{ backgroundColor: `${session.document.subjectColor}20` }}
+                        >
+                          <BookOpen className="h-4 w-4" style={{ color: session.document.subjectColor }} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">
+                            {session.mode === "FLASHCARDS" ? "Flashcards" : session.mode === "QUIZ" ? "Quiz" : "V/F"} - {session.document.subjectName}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {session.correctAnswers}/{session.totalQuestions} correctas · {formatTimeAgo(session.completedAt)}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm font-medium">{activity.description}</p>
-                        <p className="text-xs text-gray-500">{activity.time}</p>
-                      </div>
+                      <Badge variant="xp" size="sm">
+                        +{session.xpEarned} XP
+                      </Badge>
                     </div>
-                    <Badge variant="xp" size="sm">
-                      +{activity.xp} XP
-                    </Badge>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </motion.div>
@@ -358,7 +445,7 @@ export default function ProfilePage() {
             <div className="flex items-center justify-around">
               <div className="text-center">
                 <div className="flex items-center justify-center gap-2">
-                  <Flame className="h-8 w-8 text-orange-500 animate-fire" />
+                  <Flame className={`h-8 w-8 text-orange-500 ${userData.currentStreak > 0 ? "animate-pulse" : ""}`} />
                   <span className="text-4xl font-bold">{userData.currentStreak}</span>
                 </div>
                 <p className="mt-1 text-gray-500">Racha actual</p>
@@ -371,29 +458,13 @@ export default function ProfilePage() {
                 </div>
                 <p className="mt-1 text-gray-500">Mejor racha</p>
               </div>
-            </div>
-
-            {/* Calendar heatmap (simplified) */}
-            <div className="mt-6">
-              <p className="mb-3 text-sm text-gray-500">Últimos 30 días</p>
-              <div className="flex flex-wrap gap-1">
-                {Array.from({ length: 30 }, (_, i) => {
-                  const intensity = Math.random();
-                  return (
-                    <div
-                      key={i}
-                      className={`h-4 w-4 rounded-sm ${
-                        intensity > 0.7
-                          ? "bg-green-500"
-                          : intensity > 0.4
-                          ? "bg-green-300"
-                          : intensity > 0.1
-                          ? "bg-green-100 dark:bg-green-900/30"
-                          : "bg-gray-100 dark:bg-gray-800"
-                      }`}
-                    />
-                  );
-                })}
+              <div className="h-16 w-px bg-gray-200 dark:bg-gray-700" />
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-4xl">🧊</span>
+                  <span className="text-4xl font-bold">{userData.streakFreezes}</span>
+                </div>
+                <p className="mt-1 text-gray-500">Streak Freezes</p>
               </div>
             </div>
           </CardContent>

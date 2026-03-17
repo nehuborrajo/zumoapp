@@ -1,9 +1,11 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
 import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Progress } from "@/components/ui";
+import { useCourses } from "@/hooks/useCourses";
+import { useUser } from "@/hooks/useUser";
 import {
   BookOpen,
   Plus,
@@ -16,14 +18,9 @@ import {
   Calendar,
   Star,
   Zap,
+  Folder,
+  Loader2,
 } from "lucide-react";
-
-// Mock data (will come from API later)
-const recentDocuments = [
-  { id: "1", title: "Biología - Célula", subject: "Biología", flashcards: 24, lastStudied: "Hace 2h" },
-  { id: "2", title: "Historia de España", subject: "Historia", flashcards: 45, lastStudied: "Ayer" },
-  { id: "3", title: "Matemáticas - Derivadas", subject: "Matemáticas", flashcards: 18, lastStudied: "Hace 3 días" },
-];
 
 const weeklyActivity = [
   { day: "L", value: 45, active: true },
@@ -42,7 +39,19 @@ const achievements = [
 ];
 
 export default function DashboardPage() {
-  const { user } = useUser();
+  const [supabaseUser, setSupabaseUser] = useState<any>(null);
+  const { user, loading: userLoading } = useUser();
+  const { courses, loading: coursesLoading } = useCourses();
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const { createClient } = await import("@/lib/supabase/client");
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      setSupabaseUser(user);
+    };
+    loadUser();
+  }, []);
 
   const greeting = () => {
     const hour = new Date().getHours();
@@ -50,6 +59,21 @@ export default function DashboardPage() {
     if (hour < 18) return "Buenas tardes";
     return "Buenas noches";
   };
+
+  const userName = user?.displayName || supabaseUser?.user_metadata?.display_name || supabaseUser?.user_metadata?.name || "Estudiante";
+
+  // Get recent courses (last 3)
+  const recentCourses = courses.slice(0, 3);
+
+  // Stats from user data
+  const stats = {
+    currentStreak: user?.currentStreak ?? 0,
+    totalXp: user?.totalXp ?? 0,
+    coins: user?.coins ?? 100,
+    level: user?.level ?? 1,
+  };
+
+  const loading = userLoading || coursesLoading;
 
   return (
     <div className="space-y-8">
@@ -61,16 +85,16 @@ export default function DashboardPage() {
       >
         <div>
           <h1 className="text-2xl font-bold sm:text-3xl">
-            {greeting()}, {user?.firstName || "Estudiante"}! 👋
+            {greeting()}, {userName}! 👋
           </h1>
           <p className="mt-1 text-gray-600 dark:text-gray-400">
             Continúa tu racha de estudio y alcanza tus metas.
           </p>
         </div>
-        <Link href="/documents/new">
+        <Link href="/containers">
           <Button>
             <Plus className="h-4 w-4" />
-            Subir documento
+            Nuevo curso
           </Button>
         </Link>
       </motion.div>
@@ -88,9 +112,13 @@ export default function DashboardPage() {
                 <div className="rounded-xl bg-orange-100 p-3 dark:bg-orange-900/30">
                   <Flame className="h-6 w-6 text-orange-500" />
                 </div>
-                <Badge variant="streak">+5 ayer</Badge>
+                {stats.currentStreak > 0 && (
+                  <Badge variant="streak">🔥 Activa</Badge>
+                )}
               </div>
-              <p className="mt-4 text-3xl font-bold">7 días</p>
+              <p className="mt-4 text-3xl font-bold">
+                {loading ? <Loader2 className="h-8 w-8 animate-spin" /> : `${stats.currentStreak} días`}
+              </p>
               <p className="text-sm text-gray-500">Racha actual</p>
             </CardContent>
           </Card>
@@ -107,9 +135,11 @@ export default function DashboardPage() {
                 <div className="rounded-xl bg-purple-100 p-3 dark:bg-purple-900/30">
                   <Star className="h-6 w-6 text-purple-500" />
                 </div>
-                <Badge variant="xp">+120 hoy</Badge>
+                <Badge variant="xp">Nivel {stats.level}</Badge>
               </div>
-              <p className="mt-4 text-3xl font-bold">1,250 XP</p>
+              <p className="mt-4 text-3xl font-bold">
+                {loading ? <Loader2 className="h-8 w-8 animate-spin" /> : `${stats.totalXp} XP`}
+              </p>
               <p className="text-sm text-gray-500">Experiencia total</p>
             </CardContent>
           </Card>
@@ -124,11 +154,13 @@ export default function DashboardPage() {
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div className="rounded-xl bg-blue-100 p-3 dark:bg-blue-900/30">
-                  <BookOpen className="h-6 w-6 text-blue-500" />
+                  <Folder className="h-6 w-6 text-blue-500" />
                 </div>
               </div>
-              <p className="mt-4 text-3xl font-bold">87</p>
-              <p className="text-sm text-gray-500">Flashcards estudiadas hoy</p>
+              <p className="mt-4 text-3xl font-bold">
+                {loading ? <Loader2 className="h-8 w-8 animate-spin" /> : courses.length}
+              </p>
+              <p className="text-sm text-gray-500">Cursos activos</p>
             </CardContent>
           </Card>
         </motion.div>
@@ -141,12 +173,14 @@ export default function DashboardPage() {
           <Card className="card-hover">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
-                <div className="rounded-xl bg-green-100 p-3 dark:bg-green-900/30">
-                  <Target className="h-6 w-6 text-green-500" />
+                <div className="rounded-xl bg-yellow-100 p-3 dark:bg-yellow-900/30">
+                  <Target className="h-6 w-6 text-yellow-500" />
                 </div>
               </div>
-              <p className="mt-4 text-3xl font-bold">92%</p>
-              <p className="text-sm text-gray-500">Precisión promedio</p>
+              <p className="mt-4 text-3xl font-bold">
+                {loading ? <Loader2 className="h-8 w-8 animate-spin" /> : `${stats.coins}`}
+              </p>
+              <p className="text-sm text-gray-500">Monedas</p>
             </CardContent>
           </Card>
         </motion.div>
@@ -154,7 +188,7 @@ export default function DashboardPage() {
 
       {/* Main content grid */}
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Recent documents */}
+        {/* Recent courses */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -163,65 +197,74 @@ export default function DashboardPage() {
         >
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Documentos recientes</CardTitle>
-              <Link href="/documents" className="text-sm text-indigo-600 hover:text-indigo-500">
+              <CardTitle>Mis Cursos</CardTitle>
+              <Link href="/containers" className="text-sm text-indigo-600 hover:text-indigo-500">
                 Ver todos
                 <ArrowRight className="ml-1 inline h-4 w-4" />
               </Link>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {recentDocuments.map((doc, index) => (
-                  <motion.div
-                    key={doc.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.6 + index * 0.1 }}
-                  >
-                    <Link
-                      href={`/documents/${doc.id}`}
-                      className="flex items-center justify-between rounded-xl border border-gray-200 p-4 transition-all hover:border-indigo-300 hover:bg-indigo-50/50 dark:border-gray-700 dark:hover:border-indigo-700 dark:hover:bg-indigo-900/20"
+              {loading ? (
+                <div className="flex h-32 items-center justify-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {recentCourses.map((course, index) => (
+                    <motion.div
+                      key={course.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.6 + index * 0.1 }}
                     >
-                      <div className="flex items-center gap-4">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-100 dark:bg-indigo-900/30">
-                          <BookOpen className="h-6 w-6 text-indigo-500" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold">{doc.title}</h3>
-                          <div className="flex items-center gap-2 text-sm text-gray-500">
-                            <Badge variant="default" size="sm">{doc.subject}</Badge>
-                            <span>•</span>
-                            <span>{doc.flashcards} flashcards</span>
+                      <Link
+                        href={`/containers/${course.id}`}
+                        className="flex items-center justify-between rounded-xl border border-gray-200 p-4 transition-all hover:border-indigo-300 hover:bg-indigo-50/50 dark:border-gray-700 dark:hover:border-indigo-700 dark:hover:bg-indigo-900/20"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div
+                            className="flex h-12 w-12 items-center justify-center rounded-xl"
+                            style={{ backgroundColor: `${course.color}20` }}
+                          >
+                            <Folder className="h-6 w-6" style={{ color: course.color }} />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold">{course.name}</h3>
+                            <div className="flex items-center gap-2 text-sm text-gray-500">
+                              <span>{course.subjectsCount} materias</span>
+                              <span>•</span>
+                              <span>{course.documentsCount} documentos</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="flex items-center gap-1 text-sm text-gray-500">
-                          <Clock className="h-4 w-4" />
-                          {doc.lastStudied}
+                        <div className="text-right">
+                          <div className="flex items-center gap-1 text-sm text-gray-500">
+                            <Clock className="h-4 w-4" />
+                            {new Date(course.updatedAt).toLocaleDateString()}
+                          </div>
+                          <Button variant="ghost" size="sm" className="mt-1">
+                            <Zap className="h-4 w-4" />
+                            Estudiar
+                          </Button>
                         </div>
-                        <Button variant="ghost" size="sm" className="mt-1">
-                          <Zap className="h-4 w-4" />
-                          Estudiar
-                        </Button>
-                      </div>
-                    </Link>
-                  </motion.div>
-                ))}
+                      </Link>
+                    </motion.div>
+                  ))}
 
-                {recentDocuments.length === 0 && (
-                  <div className="py-12 text-center">
-                    <BookOpen className="mx-auto h-12 w-12 text-gray-300" />
-                    <p className="mt-4 text-gray-500">No tienes documentos aún</p>
-                    <Link href="/documents/new">
-                      <Button variant="outline" className="mt-4">
-                        <Plus className="h-4 w-4" />
-                        Subir tu primer documento
-                      </Button>
-                    </Link>
-                  </div>
-                )}
-              </div>
+                  {recentCourses.length === 0 && (
+                    <div className="py-12 text-center">
+                      <Folder className="mx-auto h-12 w-12 text-gray-300" />
+                      <p className="mt-4 text-gray-500">No tienes cursos aún</p>
+                      <Link href="/containers">
+                        <Button variant="outline" className="mt-4">
+                          <Plus className="h-4 w-4" />
+                          Crear tu primer curso
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </motion.div>
@@ -340,13 +383,13 @@ export default function DashboardPage() {
                 </div>
                 <div className="mt-4">
                   <div className="flex items-end justify-between">
-                    <span className="text-4xl font-bold">87</span>
-                    <span className="text-white/70">/ 100 flashcards</span>
+                    <span className="text-4xl font-bold">0</span>
+                    <span className="text-white/70">/ 50 XP</span>
                   </div>
-                  <Progress value={87} variant="health" size="lg" className="mt-3 bg-white/20" />
+                  <Progress value={0} variant="health" size="lg" className="mt-3 bg-white/20" />
                 </div>
                 <p className="mt-3 text-sm text-white/70">
-                  ¡Solo te faltan 13 flashcards para completar tu meta de hoy!
+                  ¡Estudia para ganar XP y completar tu meta diaria!
                 </p>
               </CardContent>
             </Card>

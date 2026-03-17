@@ -1,15 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Progress } from "@/components/ui";
+import { Button, Card, CardContent, Badge, Progress } from "@/components/ui";
+import { useCourses, useCourse } from "@/hooks/useCourses";
+import { useFlashcards, useQuestions } from "@/hooks/useFlashcards";
+import { useUser } from "@/hooks/useUser";
+import { studySessionsAPI, type Flashcard, type Question, type StudySessionResult } from "@/lib/api";
 import {
   BookOpen,
   ArrowRight,
-  Shuffle,
-  Clock,
-  Target,
   Zap,
   Brain,
   HelpCircle,
@@ -20,48 +22,20 @@ import {
   ChevronRight,
   Flame,
   Star,
+  Folder,
+  Loader2,
+  AlertCircle,
   Trophy,
+  TrendingUp,
+  Coins,
+  Gift,
 } from "lucide-react";
-
-// Mock data - documents to study
-const studyDocuments = [
-  {
-    id: "1",
-    title: "Biología - La Célula",
-    subject: "Biología",
-    flashcards: 24,
-    questions: 15,
-    dueForReview: 8,
-    masteryLevel: 72,
-    color: "#22c55e",
-  },
-  {
-    id: "2",
-    title: "Historia de España",
-    subject: "Historia",
-    flashcards: 45,
-    questions: 30,
-    dueForReview: 12,
-    masteryLevel: 58,
-    color: "#f59e0b",
-  },
-  {
-    id: "3",
-    title: "Matemáticas - Derivadas",
-    subject: "Matemáticas",
-    flashcards: 18,
-    questions: 12,
-    dueForReview: 5,
-    masteryLevel: 85,
-    color: "#3b82f6",
-  },
-];
 
 const studyModes = [
   {
     id: "flashcards",
     name: "Flashcards",
-    description: "Memorización con repetición espaciada",
+    description: "Memorización con tarjetas",
     icon: "🎴",
     color: "from-purple-500 to-indigo-600",
   },
@@ -89,30 +63,28 @@ const studyModes = [
   },
 ];
 
-// Mock flashcard data
-const mockFlashcards = [
-  {
-    id: "1",
-    front: "¿Cuál es la función principal de las mitocondrias?",
-    back: "Producir energía (ATP) a través de la respiración celular.",
-    difficulty: "medium",
-  },
-  {
-    id: "2",
-    front: "¿Qué es el ADN?",
-    back: "Ácido desoxirribonucleico, molécula que contiene la información genética.",
-    difficulty: "easy",
-  },
-  {
-    id: "3",
-    front: "¿Cuáles son las fases de la mitosis?",
-    back: "Profase, Metafase, Anafase y Telofase.",
-    difficulty: "hard",
-  },
-];
-
+// Wrapper component with Suspense for useSearchParams
 export default function StudyPage() {
-  const [selectedDocument, setSelectedDocument] = useState<string | null>(null);
+  return (
+    <Suspense fallback={
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+      </div>
+    }>
+      <StudyPageContent />
+    </Suspense>
+  );
+}
+
+function StudyPageContent() {
+  const searchParams = useSearchParams();
+  const { courses, loading: coursesLoading } = useCourses();
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const { course: selectedCourseData, loading: courseLoading } = useCourse(selectedCourseId);
+  const { refetch: refetchUser } = useUser();
+
+  const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [selectedMode, setSelectedMode] = useState<string | null>(null);
   const [isStudying, setIsStudying] = useState(false);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
@@ -122,11 +94,80 @@ export default function StudyPage() {
     incorrect: 0,
     total: 0,
   });
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
+  const [selectedAnswer, setSelectedAnswer] = useState<"true" | "false" | null>(null);
 
-  const totalDueForReview = studyDocuments.reduce((acc, doc) => acc + doc.dueForReview, 0);
+  // Session tracking
+  const sessionStartTime = useRef<number>(0);
+  const [sessionResult, setSessionResult] = useState<StudySessionResult | null>(null);
+  const [savingSession, setSavingSession] = useState(false);
+
+  // Check for documents param in URL
+  useEffect(() => {
+    const documentsParam = searchParams.get("documents");
+    if (documentsParam) {
+      const docIds = documentsParam.split(",").filter(Boolean);
+      if (docIds.length > 0) {
+        setSelectedDocumentIds(docIds);
+      }
+    }
+  }, [searchParams]);
+
+  // Fetch flashcards and questions for selected subject OR documents
+  const { flashcards, loading: flashcardsLoading } = useFlashcards(
+    selectedDocumentIds.length > 0
+      ? { documentIds: selectedDocumentIds }
+      : selectedSubject
+  );
+  const { questions, loading: questionsLoading } = useQuestions(
+    selectedDocumentIds.length > 0
+      ? { documentIds: selectedDocumentIds }
+      : selectedSubject
+  );
+
+  // Filter questions by type for different modes
+  const multipleChoiceQuestions = questions.filter((q) => q.type === "MULTIPLE_CHOICE");
+  const trueFalseQuestions = questions.filter((q) => q.type === "TRUE_FALSE");
+
+  // Current study items based on mode
+  const [currentItems, setCurrentItems] = useState<(Flashcard | Question)[]>([]);
+  const [shuffledItems, setShuffledItems] = useState<(Flashcard | Question)[]>([]);
+
+  // Shuffle array helper
+  const shuffleArray = <T,>(array: T[]): T[] => {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  };
 
   const startStudy = () => {
-    if (selectedDocument && selectedMode) {
+    // Can start if we have either selectedSubject OR selectedDocumentIds
+    const canStart = (selectedSubject || selectedDocumentIds.length > 0) && selectedMode;
+
+    if (canStart) {
+      let items: (Flashcard | Question)[] = [];
+
+      if (selectedMode === "flashcards") {
+        items = flashcards;
+      } else if (selectedMode === "quiz") {
+        items = multipleChoiceQuestions;
+      } else if (selectedMode === "truefalse") {
+        items = trueFalseQuestions;
+      }
+
+      if (items.length === 0) {
+        alert("No hay contenido disponible para este modo de estudio");
+        return;
+      }
+
+      sessionStartTime.current = Date.now();
+
+      const shuffled = shuffleArray(items);
+      setCurrentItems(items);
+      setShuffledItems(shuffled);
       setIsStudying(true);
       setCurrentCardIndex(0);
       setShowAnswer(false);
@@ -142,21 +183,85 @@ export default function StudyPage() {
     }));
     setShowAnswer(false);
 
-    if (currentCardIndex < mockFlashcards.length - 1) {
+    if (currentCardIndex < shuffledItems.length - 1) {
       setCurrentCardIndex((prev) => prev + 1);
     }
   };
 
   const endSession = () => {
     setIsStudying(false);
-    setSelectedDocument(null);
+    setSelectedCourseId(null);
+    setSelectedSubject(null);
+    setSelectedDocumentIds([]);
+    setSelectedMode(null);
+    setShuffledItems([]);
+    setCurrentItems([]);
+    setSessionResult(null);
+  };
+
+  // Save session to database
+  const saveSession = async (stats: { correct: number; incorrect: number; total: number }) => {
+    // Can save if we have either selectedSubject OR selectedDocumentIds
+    if ((!selectedSubject && selectedDocumentIds.length === 0) || !selectedMode || savingSession) return;
+
+    setSavingSession(true);
+    try {
+      const modeMap: Record<string, "FLASHCARDS" | "QUIZ" | "TRUE_FALSE"> = {
+        flashcards: "FLASHCARDS",
+        quiz: "QUIZ",
+        truefalse: "TRUE_FALSE",
+      };
+
+      const durationSeconds = Math.floor((Date.now() - sessionStartTime.current) / 1000);
+
+      const result = await studySessionsAPI.create({
+        subjectId: selectedSubject || undefined,
+        documentIds: selectedDocumentIds.length > 0 ? selectedDocumentIds : undefined,
+        mode: modeMap[selectedMode],
+        correctAnswers: stats.correct,
+        totalQuestions: stats.total,
+        durationSeconds,
+      });
+
+      setSessionResult(result);
+
+      // Refresh user data to update XP, coins, streak in sidebar/header
+      await refetchUser();
+    } catch (error) {
+      console.error("Error saving session:", error);
+    } finally {
+      setSavingSession(false);
+    }
+  };
+
+  const resetSelection = () => {
+    setSelectedCourseId(null);
+    setSelectedSubject(null);
+    setSelectedDocumentIds([]);
     setSelectedMode(null);
   };
 
-  // Study session view
-  if (isStudying) {
-    const currentCard = mockFlashcards[currentCardIndex];
-    const progress = ((currentCardIndex + 1) / mockFlashcards.length) * 100;
+  // Get available content count for each mode
+  const getAvailableCount = (mode: string) => {
+    if (mode === "flashcards") return flashcards.length;
+    if (mode === "quiz") return multipleChoiceQuestions.length;
+    if (mode === "truefalse") return trueFalseQuestions.length;
+    return 0;
+  };
+
+  // Check if session is complete and save it
+  const isSessionComplete = isStudying && shuffledItems.length > 0 && sessionStats.total === shuffledItems.length;
+
+  useEffect(() => {
+    if (isSessionComplete && !sessionResult && !savingSession) {
+      saveSession(sessionStats);
+    }
+  }, [isSessionComplete, sessionResult, savingSession, sessionStats]);
+
+  // Study session view - Flashcards mode
+  if (isStudying && selectedMode === "flashcards") {
+    const currentCard = shuffledItems[currentCardIndex] as Flashcard;
+    const progress = ((currentCardIndex + 1) / shuffledItems.length) * 100;
 
     return (
       <div className="mx-auto max-w-2xl space-y-6">
@@ -175,7 +280,7 @@ export default function StudyPage() {
               +{sessionStats.correct * 10} XP
             </Badge>
             <span className="text-sm text-gray-500">
-              {currentCardIndex + 1} / {mockFlashcards.length}
+              {currentCardIndex + 1} / {shuffledItems.length}
             </span>
           </div>
         </div>
@@ -196,55 +301,57 @@ export default function StudyPage() {
         </div>
 
         {/* Flashcard */}
-        <motion.div
-          key={currentCard.id}
-          initial={{ opacity: 0, x: 50 }}
-          animate={{ opacity: 1, x: 0 }}
-          className="perspective-1000"
-        >
-          <Card
-            className="min-h-[300px] cursor-pointer"
-            onClick={() => setShowAnswer(!showAnswer)}
+        {currentCard && (
+          <motion.div
+            key={currentCard.id}
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="perspective-1000"
           >
-            <CardContent className="flex h-full min-h-[300px] flex-col items-center justify-center p-8 text-center">
-              <AnimatePresence mode="wait">
-                {!showAnswer ? (
-                  <motion.div
-                    key="question"
-                    initial={{ rotateY: 180, opacity: 0 }}
-                    animate={{ rotateY: 0, opacity: 1 }}
-                    exit={{ rotateY: -180, opacity: 0 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <Badge variant="primary" className="mb-4">
-                      Pregunta
-                    </Badge>
-                    <p className="text-xl font-medium">{currentCard.front}</p>
-                    <p className="mt-6 text-sm text-gray-400">
-                      Toca para ver la respuesta
-                    </p>
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="answer"
-                    initial={{ rotateY: -180, opacity: 0 }}
-                    animate={{ rotateY: 0, opacity: 1 }}
-                    exit={{ rotateY: 180, opacity: 0 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <Badge variant="success" className="mb-4">
-                      Respuesta
-                    </Badge>
-                    <p className="text-xl font-medium">{currentCard.back}</p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </CardContent>
-          </Card>
-        </motion.div>
+            <Card
+              className="min-h-[300px] cursor-pointer"
+              onClick={() => setShowAnswer(!showAnswer)}
+            >
+              <CardContent className="flex h-full min-h-[300px] flex-col items-center justify-center p-8 text-center">
+                <AnimatePresence mode="wait">
+                  {!showAnswer ? (
+                    <motion.div
+                      key="question"
+                      initial={{ rotateY: 180, opacity: 0 }}
+                      animate={{ rotateY: 0, opacity: 1 }}
+                      exit={{ rotateY: -180, opacity: 0 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <Badge variant="primary" className="mb-4">
+                        Pregunta
+                      </Badge>
+                      <p className="text-xl font-medium">{currentCard.front}</p>
+                      <p className="mt-6 text-sm text-gray-400">
+                        Toca para ver la respuesta
+                      </p>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="answer"
+                      initial={{ rotateY: -180, opacity: 0 }}
+                      animate={{ rotateY: 0, opacity: 1 }}
+                      exit={{ rotateY: 180, opacity: 0 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <Badge variant="success" className="mb-4">
+                        Respuesta
+                      </Badge>
+                      <p className="text-xl font-medium">{currentCard.back}</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
         {/* Answer buttons */}
-        {showAnswer && (
+        {showAnswer && !isSessionComplete && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -280,195 +387,658 @@ export default function StudyPage() {
         )}
 
         {/* Session complete */}
-        {currentCardIndex === mockFlashcards.length - 1 && sessionStats.total === mockFlashcards.length && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          >
-            <Card className="w-full max-w-md">
-              <CardContent className="p-8 text-center">
-                <div className="mb-4 text-6xl">🎉</div>
-                <h2 className="text-2xl font-bold">¡Sesión completada!</h2>
-                <div className="mt-6 grid grid-cols-3 gap-4">
-                  <div className="rounded-xl bg-green-50 p-4 dark:bg-green-900/20">
-                    <p className="text-2xl font-bold text-green-600">{sessionStats.correct}</p>
-                    <p className="text-sm text-gray-500">Correctas</p>
-                  </div>
-                  <div className="rounded-xl bg-red-50 p-4 dark:bg-red-900/20">
-                    <p className="text-2xl font-bold text-red-500">{sessionStats.incorrect}</p>
-                    <p className="text-sm text-gray-500">Incorrectas</p>
-                  </div>
-                  <div className="rounded-xl bg-purple-50 p-4 dark:bg-purple-900/20">
-                    <p className="text-2xl font-bold text-purple-600">
-                      {Math.round((sessionStats.correct / sessionStats.total) * 100)}%
-                    </p>
-                    <p className="text-sm text-gray-500">Precisión</p>
-                  </div>
-                </div>
-                <div className="mt-6 flex items-center justify-center gap-4">
-                  <Badge variant="xp" size="lg">
-                    <Star className="h-4 w-4" />
-                    +{sessionStats.correct * 10} XP ganado
-                  </Badge>
-                  <Badge variant="streak" size="lg">
-                    <Flame className="h-4 w-4" />
-                    ¡Racha mantenida!
-                  </Badge>
-                </div>
-                <div className="mt-8 flex gap-3">
-                  <Button variant="outline" className="flex-1" onClick={endSession}>
-                    Terminar
-                  </Button>
-                  <Button className="flex-1" onClick={() => {
-                    setCurrentCardIndex(0);
-                    setShowAnswer(false);
-                    setSessionStats({ correct: 0, incorrect: 0, total: 0 });
-                  }}>
-                    <RotateCcw className="h-4 w-4" />
-                    Repetir
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
+        {isSessionComplete && (
+          <SessionCompleteModal
+            stats={sessionStats}
+            sessionResult={sessionResult}
+            savingSession={savingSession}
+            onEnd={endSession}
+            onRepeat={() => {
+              const shuffled = shuffleArray(currentItems);
+              setShuffledItems(shuffled);
+              setCurrentCardIndex(0);
+              setShowAnswer(false);
+              setSessionStats({ correct: 0, incorrect: 0, total: 0 });
+              setSessionResult(null);
+              sessionStartTime.current = Date.now();
+            }}
+          />
         )}
       </div>
     );
   }
 
+  // Study session view - Quiz mode
+  if (isStudying && selectedMode === "quiz") {
+    const currentQuestion = shuffledItems[currentCardIndex] as Question;
+    const progress = ((currentCardIndex + 1) / shuffledItems.length) * 100;
+
+    const handleQuizAnswer = (option: string) => {
+      if (showAnswer) return;
+      setSelectedOption(option);
+      setShowAnswer(true);
+    };
+
+    const handleNextQuestion = () => {
+      const isCorrect = selectedOption === currentQuestion.correctAnswer;
+      handleAnswer(isCorrect);
+      setSelectedOption(null);
+    };
+
+    const userWasCorrect = selectedOption === currentQuestion?.correctAnswer;
+
+    return (
+      <div className="mx-auto max-w-2xl space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <button
+            onClick={endSession}
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Salir
+          </button>
+          <div className="flex items-center gap-4">
+            <Badge variant="xp">
+              <Star className="h-3 w-3" />
+              +{sessionStats.correct * 15} XP
+            </Badge>
+            <span className="text-sm text-gray-500">
+              {currentCardIndex + 1} / {shuffledItems.length}
+            </span>
+          </div>
+        </div>
+
+        <Progress value={progress} variant="xp" size="sm" />
+
+        {/* Stats */}
+        <div className="flex justify-center gap-6">
+          <div className="flex items-center gap-2 text-green-600">
+            <CheckCircle className="h-5 w-5" />
+            <span className="font-semibold">{sessionStats.correct}</span>
+          </div>
+          <div className="flex items-center gap-2 text-red-500">
+            <XCircle className="h-5 w-5" />
+            <span className="font-semibold">{sessionStats.incorrect}</span>
+          </div>
+        </div>
+
+        {/* Question */}
+        {currentQuestion && (
+          <motion.div
+            key={currentQuestion.id}
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+          >
+            <Card className={showAnswer ? (userWasCorrect ? "border-green-400" : "border-red-400") : ""}>
+              <CardContent className="p-6">
+                {/* Feedback banner */}
+                {showAnswer && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`mb-4 p-3 rounded-xl ${
+                      userWasCorrect
+                        ? "bg-green-100 dark:bg-green-900/30"
+                        : "bg-red-100 dark:bg-red-900/30"
+                    }`}
+                  >
+                    <div className="flex items-center justify-center gap-2">
+                      {userWasCorrect ? (
+                        <>
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <span className="font-semibold text-green-700 dark:text-green-400">¡Correcto! +15 XP</span>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-5 w-5 text-red-600" />
+                          <span className="font-semibold text-red-700 dark:text-red-400">Incorrecto</span>
+                        </>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+
+                <p className="text-lg font-medium mb-6">{currentQuestion.question}</p>
+
+                <div className="space-y-3">
+                  {(currentQuestion.options as string[] || []).map((option, index) => {
+                    const isSelected = selectedOption === option;
+                    const isCorrect = option === currentQuestion.correctAnswer;
+                    const showResult = showAnswer;
+
+                    return (
+                      <motion.button
+                        key={index}
+                        whileHover={!showAnswer ? { scale: 1.01 } : {}}
+                        whileTap={!showAnswer ? { scale: 0.99 } : {}}
+                        onClick={() => handleQuizAnswer(option)}
+                        disabled={showAnswer}
+                        className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+                          showResult
+                            ? isCorrect
+                              ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                              : isSelected
+                              ? "border-red-500 bg-red-50 dark:bg-red-900/20"
+                              : "border-gray-200 dark:border-gray-700 opacity-50"
+                            : isSelected
+                            ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20"
+                            : "border-gray-200 hover:border-indigo-300 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium ${
+                            showResult
+                              ? isCorrect
+                                ? "bg-green-500 text-white"
+                                : isSelected
+                                ? "bg-red-500 text-white"
+                                : "bg-gray-100 dark:bg-gray-800"
+                              : isSelected
+                              ? "bg-indigo-500 text-white"
+                              : "bg-gray-100 dark:bg-gray-800"
+                          }`}>
+                            {String.fromCharCode(65 + index)}
+                          </span>
+                          <span className="flex-1">{option}</span>
+                          {showResult && isCorrect && (
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                          )}
+                          {showResult && isSelected && !isCorrect && (
+                            <XCircle className="h-5 w-5 text-red-500" />
+                          )}
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+
+                {showAnswer && currentQuestion.explanation && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-4 p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20"
+                  >
+                    <p className="text-sm text-blue-800 dark:text-blue-200">
+                      <strong>💡 Explicación:</strong> {currentQuestion.explanation}
+                    </p>
+                  </motion.div>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {/* Next button */}
+        {showAnswer && !isSessionComplete && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex justify-center"
+          >
+            <Button size="lg" onClick={handleNextQuestion}>
+              Siguiente pregunta
+              <ChevronRight className="h-5 w-5" />
+            </Button>
+          </motion.div>
+        )}
+
+        {/* Session complete */}
+        {isSessionComplete && (
+          <SessionCompleteModal
+            stats={sessionStats}
+            xpPerCorrect={15}
+            sessionResult={sessionResult}
+            savingSession={savingSession}
+            onEnd={endSession}
+            onRepeat={() => {
+              const shuffled = shuffleArray(currentItems);
+              setShuffledItems(shuffled);
+              setCurrentCardIndex(0);
+              setShowAnswer(false);
+              setSessionStats({ correct: 0, incorrect: 0, total: 0 });
+              setSelectedOption(null);
+              setSessionResult(null);
+              sessionStartTime.current = Date.now();
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // Study session view - True/False mode
+  if (isStudying && selectedMode === "truefalse") {
+    const currentQuestion = shuffledItems[currentCardIndex] as Question;
+    const progress = ((currentCardIndex + 1) / shuffledItems.length) * 100;
+
+    const handleTrueFalseAnswer = (answer: "true" | "false") => {
+      if (showAnswer) return;
+      setSelectedAnswer(answer);
+      const isCorrect = answer === currentQuestion.correctAnswer.toLowerCase();
+      setShowAnswer(true);
+
+      // Auto advance after showing feedback
+      setTimeout(() => {
+        handleAnswer(isCorrect);
+        setSelectedAnswer(null);
+      }, 1800);
+    };
+
+    const userWasCorrect = selectedAnswer === currentQuestion?.correctAnswer?.toLowerCase();
+
+    return (
+      <div className="mx-auto max-w-2xl space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <button
+            onClick={endSession}
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Salir
+          </button>
+          <div className="flex items-center gap-4">
+            <Badge variant="xp">
+              <Star className="h-3 w-3" />
+              +{sessionStats.correct * 5} XP
+            </Badge>
+            <span className="text-sm text-gray-500">
+              {currentCardIndex + 1} / {shuffledItems.length}
+            </span>
+          </div>
+        </div>
+
+        <Progress value={progress} variant="xp" size="sm" />
+
+        {/* Stats */}
+        <div className="flex justify-center gap-6">
+          <div className="flex items-center gap-2 text-green-600">
+            <CheckCircle className="h-5 w-5" />
+            <span className="font-semibold">{sessionStats.correct}</span>
+          </div>
+          <div className="flex items-center gap-2 text-red-500">
+            <XCircle className="h-5 w-5" />
+            <span className="font-semibold">{sessionStats.incorrect}</span>
+          </div>
+        </div>
+
+        {/* Question */}
+        {currentQuestion && (
+          <motion.div
+            key={currentQuestion.id}
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+          >
+            <Card className={showAnswer ? (userWasCorrect ? "border-green-400" : "border-red-400") : ""}>
+              <CardContent className="p-8 text-center">
+                {/* Feedback banner */}
+                {showAnswer && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`mb-6 p-3 rounded-xl ${
+                      userWasCorrect
+                        ? "bg-green-100 dark:bg-green-900/30"
+                        : "bg-red-100 dark:bg-red-900/30"
+                    }`}
+                  >
+                    <div className="flex items-center justify-center gap-2">
+                      {userWasCorrect ? (
+                        <>
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <span className="font-semibold text-green-700 dark:text-green-400">¡Correcto!</span>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-5 w-5 text-red-600" />
+                          <span className="font-semibold text-red-700 dark:text-red-400">
+                            Incorrecto - La respuesta es: {currentQuestion.correctAnswer === "true" || currentQuestion.correctAnswer.toLowerCase() === "true" ? "Verdadero" : "Falso"}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+
+                <p className="text-xl font-medium mb-8">{currentQuestion.question}</p>
+
+                <div className="flex justify-center gap-4">
+                  <motion.button
+                    whileHover={!showAnswer ? { scale: 1.05 } : {}}
+                    whileTap={!showAnswer ? { scale: 0.95 } : {}}
+                    disabled={showAnswer}
+                    onClick={() => handleTrueFalseAnswer("true")}
+                    className={`flex items-center gap-3 px-8 py-4 rounded-2xl font-semibold text-lg transition-all ${
+                      showAnswer
+                        ? currentQuestion.correctAnswer.toLowerCase() === "true"
+                          ? "bg-green-500 text-white ring-4 ring-green-300"
+                          : selectedAnswer === "true"
+                          ? "bg-red-500 text-white"
+                          : "bg-gray-200 text-gray-500 dark:bg-gray-700"
+                        : "bg-green-500 text-white hover:bg-green-600"
+                    }`}
+                  >
+                    <CheckCircle className="h-6 w-6" />
+                    Verdadero
+                  </motion.button>
+                  <motion.button
+                    whileHover={!showAnswer ? { scale: 1.05 } : {}}
+                    whileTap={!showAnswer ? { scale: 0.95 } : {}}
+                    disabled={showAnswer}
+                    onClick={() => handleTrueFalseAnswer("false")}
+                    className={`flex items-center gap-3 px-8 py-4 rounded-2xl font-semibold text-lg transition-all ${
+                      showAnswer
+                        ? currentQuestion.correctAnswer.toLowerCase() === "false"
+                          ? "bg-green-500 text-white ring-4 ring-green-300"
+                          : selectedAnswer === "false"
+                          ? "bg-red-500 text-white"
+                          : "bg-gray-200 text-gray-500 dark:bg-gray-700"
+                        : "bg-red-500 text-white hover:bg-red-600"
+                    }`}
+                  >
+                    <XCircle className="h-6 w-6" />
+                    Falso
+                  </motion.button>
+                </div>
+
+                {showAnswer && currentQuestion.explanation && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-6 p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-left"
+                  >
+                    <p className="text-sm text-blue-800 dark:text-blue-200">
+                      <strong>💡 Explicación:</strong> {currentQuestion.explanation}
+                    </p>
+                  </motion.div>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {/* Session complete */}
+        {isSessionComplete && (
+          <SessionCompleteModal
+            stats={sessionStats}
+            xpPerCorrect={5}
+            sessionResult={sessionResult}
+            savingSession={savingSession}
+            onEnd={endSession}
+            onRepeat={() => {
+              const shuffled = shuffleArray(currentItems);
+              setShuffledItems(shuffled);
+              setCurrentCardIndex(0);
+              setShowAnswer(false);
+              setSessionStats({ correct: 0, incorrect: 0, total: 0 });
+              setSelectedAnswer(null);
+              setSessionResult(null);
+              sessionStartTime.current = Date.now();
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // Main selection view
   return (
     <div className="space-y-8">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold sm:text-3xl">Estudiar</h1>
         <p className="mt-1 text-gray-600 dark:text-gray-400">
-          {totalDueForReview > 0
-            ? `Tienes ${totalDueForReview} tarjetas pendientes de repasar`
-            : "Selecciona un documento y modo de estudio"}
+          Selecciona un curso y materia para empezar
         </p>
       </div>
 
-      {/* Quick review card */}
-      {totalDueForReview > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <Card className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white">
-            <CardContent className="flex items-center justify-between p-6">
-              <div className="flex items-center gap-4">
-                <div className="rounded-xl bg-white/20 p-3">
-                  <Brain className="h-8 w-8" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold">Repaso diario</h3>
-                  <p className="text-white/80">
-                    {totalDueForReview} tarjetas listas para repasar
-                  </p>
-                </div>
+      {/* Step 1: Select course */}
+      <div>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">1. Selecciona un curso</h2>
+          {(selectedCourseId || selectedDocumentIds.length > 0) && (
+            <button
+              onClick={resetSelection}
+              className="text-sm text-indigo-600 hover:text-indigo-500"
+            >
+              Cambiar selección
+            </button>
+          )}
+        </div>
+
+        {/* Show selected documents from URL */}
+        {selectedDocumentIds.length > 0 ? (
+          <Card className="border-indigo-200 bg-indigo-50/50 dark:border-indigo-800 dark:bg-indigo-900/20">
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 dark:bg-indigo-900/30">
+                <BookOpen className="h-5 w-5 text-indigo-500" />
               </div>
-              <Button
-                variant="secondary"
-                size="lg"
-                className="bg-white text-indigo-600 hover:bg-gray-100"
-              >
-                <Zap className="h-5 w-5" />
-                Empezar repaso
-              </Button>
+              <div>
+                <p className="font-semibold">Documentos seleccionados</p>
+                <p className="text-sm text-gray-500">{selectedDocumentIds.length} documento(s)</p>
+              </div>
+              <CheckCircle className="ml-auto h-5 w-5 text-indigo-500" />
             </CardContent>
           </Card>
-        </motion.div>
-      )}
-
-      {/* Step 1: Select document */}
-      <div>
-        <h2 className="mb-4 text-lg font-semibold">1. Selecciona un documento</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {studyDocuments.map((doc, index) => (
-            <motion.div
-              key={doc.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }}
-            >
-              <Card
-                className={`cursor-pointer transition-all ${
-                  selectedDocument === doc.id
-                    ? "ring-2 ring-indigo-500 ring-offset-2"
-                    : "hover:border-indigo-300"
-                }`}
-                onClick={() => setSelectedDocument(doc.id)}
+        ) : coursesLoading ? (
+          <div className="flex h-32 items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+          </div>
+        ) : !selectedCourseId ? (
+          courses.length > 0 ? (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {courses.map((course, index) => (
+                <motion.div
+                  key={course.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                >
+                  <Card
+                    className="cursor-pointer transition-all hover:border-indigo-300 hover:shadow-md"
+                    onClick={() => setSelectedCourseId(course.id)}
+                  >
+                    <div className="h-2" style={{ backgroundColor: course.color }} />
+                    <CardContent className="p-6">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="flex h-12 w-12 items-center justify-center rounded-xl"
+                          style={{ backgroundColor: `${course.color}20` }}
+                        >
+                          <Folder className="h-6 w-6" style={{ color: course.color }} />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold">{course.name}</h3>
+                          <p className="text-sm text-gray-500">
+                            {course.subjectsCount} materias
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
+                        <span>{course.flashcardsCount || 0} flashcards</span>
+                        <ChevronRight className="h-4 w-4" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <Folder className="mx-auto h-12 w-12 text-gray-300" />
+                <p className="mt-4 text-gray-500">No tienes cursos aún</p>
+                <Link href="/containers">
+                  <Button variant="outline" className="mt-4">
+                    Crear un curso
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          )
+        ) : (
+          <Card className="border-indigo-200 bg-indigo-50/50 dark:border-indigo-800 dark:bg-indigo-900/20">
+            <CardContent className="flex items-center gap-4 p-4">
+              <div
+                className="flex h-10 w-10 items-center justify-center rounded-xl"
+                style={{ backgroundColor: `${selectedCourseData?.color || '#6366f1'}20` }}
               >
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <Badge style={{ backgroundColor: `${doc.color}20`, color: doc.color }}>
-                      {doc.subject}
-                    </Badge>
-                    {doc.dueForReview > 0 && (
-                      <Badge variant="warning" size="sm">
-                        {doc.dueForReview} pendientes
-                      </Badge>
-                    )}
-                  </div>
-                  <h3 className="mt-4 font-semibold">{doc.title}</h3>
-                  <div className="mt-3 flex items-center gap-4 text-sm text-gray-500">
-                    <span>{doc.flashcards} flashcards</span>
-                    <span>{doc.questions} preguntas</span>
-                  </div>
-                  <div className="mt-4">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-500">Dominio</span>
-                      <span className="font-medium">{doc.masteryLevel}%</span>
-                    </div>
-                    <Progress
-                      value={doc.masteryLevel}
-                      variant={doc.masteryLevel >= 80 ? "success" : "default"}
-                      size="sm"
-                      className="mt-2"
-                      animated={false}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+                <Folder className="h-5 w-5" style={{ color: selectedCourseData?.color || '#6366f1' }} />
+              </div>
+              <div>
+                <p className="font-semibold">{selectedCourseData?.name || 'Cargando...'}</p>
+                <p className="text-sm text-gray-500">{selectedCourseData?.subjectsCount || 0} materias</p>
+              </div>
+              <CheckCircle className="ml-auto h-5 w-5 text-indigo-500" />
+            </CardContent>
+          </Card>
+        )}
       </div>
 
-      {/* Step 2: Select mode */}
-      <div className={selectedDocument ? "" : "pointer-events-none opacity-50"}>
-        <h2 className="mb-4 text-lg font-semibold">2. Elige el modo de estudio</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {studyModes.map((mode, index) => (
-            <motion.div
-              key={mode.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 + index * 0.1 }}
-            >
-              <Card
-                className={`cursor-pointer transition-all ${
-                  selectedMode === mode.id
-                    ? "ring-2 ring-indigo-500 ring-offset-2"
-                    : "hover:border-indigo-300"
-                } ${mode.premium ? "relative overflow-hidden" : ""}`}
-                onClick={() => !mode.premium && setSelectedMode(mode.id)}
-              >
-                {mode.premium && (
-                  <div className="absolute right-0 top-0 rounded-bl-xl bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-1 text-xs font-semibold text-white">
-                    PRO
-                  </div>
-                )}
-                <CardContent className="p-6 text-center">
-                  <div className="mb-4 text-5xl">{mode.icon}</div>
-                  <h3 className="font-semibold">{mode.name}</h3>
-                  <p className="mt-2 text-sm text-gray-500">{mode.description}</p>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+      {/* Step 2: Select subject */}
+      <div className={(selectedCourseId || selectedDocumentIds.length > 0) ? "" : "pointer-events-none opacity-50"}>
+        <h2 className="mb-4 text-lg font-semibold">2. Selecciona una materia</h2>
+
+        {selectedDocumentIds.length > 0 ? (
+          // When documents are pre-selected from URL, show as completed
+          <Card className="border-indigo-200 bg-indigo-50/50 dark:border-indigo-800 dark:bg-indigo-900/20">
+            <CardContent className="flex items-center gap-4 p-4">
+              <BookOpen className="h-5 w-5 text-indigo-500" />
+              <div>
+                <p className="font-semibold">Contenido seleccionado</p>
+                <p className="text-sm text-gray-500">
+                  {flashcardsLoading ? "Cargando..." : `${flashcards.length} flashcards · ${questions.length} preguntas`}
+                </p>
+              </div>
+              <CheckCircle className="ml-auto h-5 w-5 text-indigo-500" />
+            </CardContent>
+          </Card>
+        ) : courseLoading ? (
+          <div className="flex h-32 items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+          </div>
+        ) : selectedCourseId && !selectedSubject ? (
+          selectedCourseData && selectedCourseData.subjects.length > 0 ? (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {selectedCourseData.subjects.map((subject: any, index: number) => (
+                <motion.div
+                  key={subject.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                >
+                  <Card
+                    className={`cursor-pointer transition-all ${
+                      subject.flashcardsCount > 0
+                        ? "hover:border-indigo-300"
+                        : "opacity-60"
+                    }`}
+                    onClick={() => subject.flashcardsCount > 0 && setSelectedSubject(subject.id)}
+                  >
+                    <CardContent className="p-6">
+                      <div className="flex items-center justify-between">
+                        <Badge style={{ backgroundColor: `${subject.color || '#6366f1'}20`, color: subject.color || '#6366f1' }}>
+                          {subject.name}
+                        </Badge>
+                        {subject.flashcardsCount === 0 && (
+                          <Badge variant="warning">Sin contenido</Badge>
+                        )}
+                      </div>
+                      <div className="mt-4 flex items-center gap-4 text-sm text-gray-500">
+                        <span>{subject.documentsCount || 0} docs</span>
+                        <span>{subject.flashcardsCount || 0} flashcards</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <BookOpen className="mx-auto h-10 w-10 text-gray-300" />
+                <p className="mt-4 text-gray-500">No hay materias en este curso</p>
+                <Link href={`/containers/${selectedCourseId}`}>
+                  <Button variant="outline" size="sm" className="mt-4">
+                    Agregar materias
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          )
+        ) : selectedSubject ? (
+          <Card className="border-indigo-200 bg-indigo-50/50 dark:border-indigo-800 dark:bg-indigo-900/20">
+            <CardContent className="flex items-center gap-4 p-4">
+              <BookOpen className="h-5 w-5 text-indigo-500" />
+              <div>
+                <p className="font-semibold">
+                  {selectedCourseData?.subjects.find((s: any) => s.id === selectedSubject)?.name}
+                </p>
+                <p className="text-sm text-gray-500">
+                  {flashcardsLoading ? "Cargando..." : `${flashcards.length} flashcards · ${questions.length} preguntas`}
+                </p>
+              </div>
+              <CheckCircle className="ml-auto h-5 w-5 text-indigo-500" />
+            </CardContent>
+          </Card>
+        ) : (
+          <p className="text-gray-500">Selecciona un curso primero</p>
+        )}
+      </div>
+
+      {/* Step 3: Select mode */}
+      <div className={(selectedSubject || selectedDocumentIds.length > 0) ? "" : "pointer-events-none opacity-50"}>
+        <h2 className="mb-4 text-lg font-semibold">3. Elige el modo de estudio</h2>
+
+        {(flashcardsLoading || questionsLoading) && (selectedSubject || selectedDocumentIds.length > 0) ? (
+          <div className="flex h-32 items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {studyModes.map((mode, index) => {
+              const count = getAvailableCount(mode.id);
+              const isDisabled = mode.premium || count === 0;
+
+              return (
+                <motion.div
+                  key={mode.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 + index * 0.1 }}
+                >
+                  <Card
+                    className={`cursor-pointer transition-all ${
+                      selectedMode === mode.id
+                        ? "ring-2 ring-indigo-500 ring-offset-2"
+                        : isDisabled
+                        ? "opacity-50"
+                        : "hover:border-indigo-300"
+                    } ${mode.premium ? "relative overflow-hidden" : ""}`}
+                    onClick={() => !isDisabled && setSelectedMode(mode.id)}
+                  >
+                    {mode.premium && (
+                      <div className="absolute right-0 top-0 rounded-bl-xl bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-1 text-xs font-semibold text-white">
+                        PRO
+                      </div>
+                    )}
+                    <CardContent className="p-6 text-center">
+                      <div className="mb-4 text-5xl">{mode.icon}</div>
+                      <h3 className="font-semibold">{mode.name}</h3>
+                      <p className="mt-2 text-sm text-gray-500">{mode.description}</p>
+                      {!mode.premium && (selectedSubject || selectedDocumentIds.length > 0) && (
+                        <Badge variant={count > 0 ? "primary" : "default"} className="mt-3">
+                          {count} disponibles
+                        </Badge>
+                      )}
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Start button */}
@@ -480,7 +1050,7 @@ export default function StudyPage() {
       >
         <Button
           size="xl"
-          disabled={!selectedDocument || !selectedMode}
+          disabled={(!selectedSubject && selectedDocumentIds.length === 0) || !selectedMode || getAvailableCount(selectedMode || "") === 0}
           onClick={startStudy}
         >
           <Zap className="h-5 w-5" />
@@ -489,5 +1059,205 @@ export default function StudyPage() {
         </Button>
       </motion.div>
     </div>
+  );
+}
+
+// Session Complete Modal Component
+function SessionCompleteModal({
+  stats,
+  xpPerCorrect = 10,
+  sessionResult,
+  savingSession,
+  onEnd,
+  onRepeat,
+}: {
+  stats: { correct: number; incorrect: number; total: number };
+  xpPerCorrect?: number;
+  sessionResult: StudySessionResult | null;
+  savingSession: boolean;
+  onEnd: () => void;
+  onRepeat: () => void;
+}) {
+  const accuracy = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    >
+      <Card className="w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <CardContent className="p-8 text-center">
+          {savingSession ? (
+            <>
+              <Loader2 className="mx-auto h-12 w-12 animate-spin text-indigo-500" />
+              <p className="mt-4 text-gray-500">Guardando sesión...</p>
+            </>
+          ) : (
+            <>
+              {/* Emoji based on performance */}
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: "spring", delay: 0.1 }}
+                className="mb-4 text-6xl"
+              >
+                {accuracy >= 90 ? "🏆" : accuracy >= 70 ? "🎉" : accuracy >= 50 ? "💪" : "📚"}
+              </motion.div>
+
+              <h2 className="text-2xl font-bold">
+                {accuracy >= 90
+                  ? "¡Excelente!"
+                  : accuracy >= 70
+                  ? "¡Muy bien!"
+                  : accuracy >= 50
+                  ? "¡Buen intento!"
+                  : "¡Sigue practicando!"}
+              </h2>
+
+              {/* Stats grid */}
+              <div className="mt-6 grid grid-cols-3 gap-4">
+                <div className="rounded-xl bg-green-50 p-4 dark:bg-green-900/20">
+                  <p className="text-2xl font-bold text-green-600">{stats.correct}</p>
+                  <p className="text-sm text-gray-500">Correctas</p>
+                </div>
+                <div className="rounded-xl bg-red-50 p-4 dark:bg-red-900/20">
+                  <p className="text-2xl font-bold text-red-500">{stats.incorrect}</p>
+                  <p className="text-sm text-gray-500">Incorrectas</p>
+                </div>
+                <div className="rounded-xl bg-purple-50 p-4 dark:bg-purple-900/20">
+                  <p className="text-2xl font-bold text-purple-600">{accuracy}%</p>
+                  <p className="text-sm text-gray-500">Precisión</p>
+                </div>
+              </div>
+
+              {/* Rewards from server */}
+              {sessionResult && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="mt-6 space-y-3"
+                >
+                  <div className="flex items-center justify-center gap-4 flex-wrap">
+                    <Badge variant="xp" size="lg">
+                      <Star className="h-4 w-4" />
+                      +{sessionResult.session.xpEarned} XP
+                    </Badge>
+                    {sessionResult.session.coinsEarned > 0 && (
+                      <Badge variant="coins" size="lg">
+                        <Coins className="h-4 w-4" />
+                        +{sessionResult.session.coinsEarned} monedas
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Level up notification */}
+                  {sessionResult.user.leveledUp && (
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ type: "spring", delay: 0.3 }}
+                      className="rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 p-4 text-white"
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        <TrendingUp className="h-5 w-5" />
+                        <span className="font-bold">¡Subiste al nivel {sessionResult.user.level}!</span>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Streak info */}
+                  <div className="flex items-center justify-center gap-2">
+                    <Badge variant="streak" size="lg">
+                      <Flame className="h-4 w-4" />
+                      {sessionResult.user.streakIncreased
+                        ? `¡Racha de ${sessionResult.user.currentStreak} días!`
+                        : `Racha: ${sessionResult.user.currentStreak} días`}
+                    </Badge>
+                  </div>
+
+                  {/* Achievements unlocked */}
+                  {sessionResult.achievements.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: 0.4 }}
+                      className="mt-4 space-y-2"
+                    >
+                      <p className="text-sm font-semibold text-gray-600">🎖️ Logros desbloqueados:</p>
+                      {sessionResult.achievements.map((achievement, i) => (
+                        <motion.div
+                          key={achievement.code}
+                          initial={{ x: -20, opacity: 0 }}
+                          animate={{ x: 0, opacity: 1 }}
+                          transition={{ delay: 0.5 + i * 0.1 }}
+                          className={`rounded-xl p-3 ${
+                            achievement.rarity === "LEGENDARY"
+                              ? "bg-gradient-to-r from-yellow-100 to-amber-100 dark:from-yellow-900/30 dark:to-amber-900/30"
+                              : achievement.rarity === "EPIC"
+                              ? "bg-gradient-to-r from-purple-100 to-pink-100 dark:from-purple-900/30 dark:to-pink-900/30"
+                              : achievement.rarity === "RARE"
+                              ? "bg-gradient-to-r from-blue-100 to-cyan-100 dark:from-blue-900/30 dark:to-cyan-900/30"
+                              : "bg-gray-100 dark:bg-gray-800"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Trophy
+                              className={`h-6 w-6 ${
+                                achievement.rarity === "LEGENDARY"
+                                  ? "text-yellow-500"
+                                  : achievement.rarity === "EPIC"
+                                  ? "text-purple-500"
+                                  : achievement.rarity === "RARE"
+                                  ? "text-blue-500"
+                                  : "text-gray-500"
+                              }`}
+                            />
+                            <div className="text-left flex-1">
+                              <p className="font-semibold">{achievement.name}</p>
+                              <p className="text-xs text-gray-500">{achievement.description}</p>
+                            </div>
+                            <div className="text-right text-xs">
+                              {achievement.rewardXp > 0 && (
+                                <span className="text-indigo-600">+{achievement.rewardXp} XP</span>
+                              )}
+                              {achievement.rewardCoins > 0 && (
+                                <span className="text-yellow-600 ml-2">+{achievement.rewardCoins}</span>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </motion.div>
+                  )}
+                </motion.div>
+              )}
+
+              {/* Fallback XP display if no server result */}
+              {!sessionResult && (
+                <div className="mt-6 flex items-center justify-center gap-4">
+                  <Badge variant="xp" size="lg">
+                    <Star className="h-4 w-4" />
+                    +{stats.correct * xpPerCorrect} XP
+                  </Badge>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="mt-8 flex gap-3">
+                <Button variant="outline" className="flex-1" onClick={onEnd}>
+                  Terminar
+                </Button>
+                <Button className="flex-1" onClick={onRepeat}>
+                  <RotateCcw className="h-4 w-4" />
+                  Repetir
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </motion.div>
   );
 }
