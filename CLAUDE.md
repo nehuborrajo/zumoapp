@@ -231,10 +231,11 @@ OPENAI_API_KEY=sk-...
 - [x] Sistema de logros (13 logros)
 - [x] Página de perfil con stats reales
 - [x] Guardar sesiones de estudio en DB
+- [x] Upload de archivos PDF (Supabase Storage)
+- [x] OCR para PDFs escaneados (Tesseract.js)
+- [x] Edición de contenido de documentos de texto
 
 ### Pendiente 📋
-- [ ] Upload de archivos PDF (Cloudflare R2)
-- [ ] OCR para PDFs escaneados (Google Cloud Vision)
 - [ ] Tienda con items comprables
 - [ ] Avatar personalizable
 - [ ] Ligas semanales funcionales

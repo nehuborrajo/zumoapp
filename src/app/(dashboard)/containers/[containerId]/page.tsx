@@ -102,7 +102,8 @@ export default function ContainerDetailPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showEditDocModal, setShowEditDocModal] = useState(false);
   const [showDeleteDocConfirm, setShowDeleteDocConfirm] = useState(false);
-  const [selectedDocData, setSelectedDocData] = useState<{ id: string; title: string; description: string } | null>(null);
+  const [selectedDocData, setSelectedDocData] = useState<{ id: string; title: string; description: string; extractedText: string; hasFile: boolean } | null>(null);
+  const [loadingDocContent, setLoadingDocContent] = useState(false);
   const [docMenuOpen, setDocMenuOpen] = useState<string | null>(null);
 
   // UI state
@@ -354,10 +355,33 @@ export default function ContainerDetailPage() {
     }
   };
 
-  const openEditDocModal = (doc: { id: string; title: string; description?: string | null }) => {
-    setSelectedDocData({ id: doc.id, title: doc.title, description: doc.description || "" });
+  const openEditDocModal = async (doc: { id: string; title: string; description?: string | null; originalFileUrl?: string | null }) => {
     setDocMenuOpen(null);
     setShowEditDocModal(true);
+    setLoadingDocContent(true);
+    setSelectedDocData({
+      id: doc.id,
+      title: doc.title,
+      description: doc.description || "",
+      extractedText: "",
+      hasFile: !!doc.originalFileUrl
+    });
+
+    // Fetch full document data to get extractedText
+    try {
+      const fullDoc = await documentsAPI.getOne(doc.id);
+      setSelectedDocData({
+        id: fullDoc.id,
+        title: fullDoc.title,
+        description: fullDoc.description || "",
+        extractedText: fullDoc.extractedText || "",
+        hasFile: !!doc.originalFileUrl
+      });
+    } catch (err) {
+      console.error("Error fetching document:", err);
+    } finally {
+      setLoadingDocContent(false);
+    }
   };
 
   const handleUpdateDocument = async () => {
@@ -367,6 +391,7 @@ export default function ContainerDetailPage() {
       await documentsAPI.update(selectedDocData.id, {
         title: selectedDocData.title.trim(),
         description: selectedDocData.description.trim() || undefined,
+        extractedText: selectedDocData.hasFile ? undefined : selectedDocData.extractedText,
       });
       setShowEditDocModal(false);
       setSelectedDocData(null);
@@ -379,7 +404,7 @@ export default function ContainerDetailPage() {
   };
 
   const openDeleteDocConfirm = (doc: { id: string; title: string }) => {
-    setSelectedDocData({ id: doc.id, title: doc.title, description: "" });
+    setSelectedDocData({ id: doc.id, title: doc.title, description: "", extractedText: "", hasFile: false });
     setDocMenuOpen(null);
     setShowDeleteDocConfirm(true);
   };
@@ -1297,7 +1322,7 @@ export default function ContainerDetailPage() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-900"
+              className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-900"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between">
@@ -1310,7 +1335,7 @@ export default function ContainerDetailPage() {
                 </button>
               </div>
 
-              <div className="mt-6 space-y-4">
+              <div className="mt-6 flex-1 space-y-4 overflow-y-auto">
                 <Input
                   label="Título del documento"
                   placeholder="Ej: Tema 1 - Introducción"
@@ -1324,6 +1349,38 @@ export default function ContainerDetailPage() {
                   value={selectedDocData.description}
                   onChange={(e) => setSelectedDocData({ ...selectedDocData, description: e.target.value })}
                 />
+
+                {/* Content editor for text-based documents */}
+                {!selectedDocData.hasFile && (
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Contenido del documento
+                    </label>
+                    {loadingDocContent ? (
+                      <div className="flex h-48 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">
+                        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                      </div>
+                    ) : (
+                      <textarea
+                        value={selectedDocData.extractedText}
+                        onChange={(e) => setSelectedDocData({ ...selectedDocData, extractedText: e.target.value })}
+                        placeholder="Pega aquí el texto de tu material de estudio..."
+                        className="h-48 w-full resize-none rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-gray-700 dark:bg-gray-800"
+                      />
+                    )}
+                    <p className="mt-1 text-xs text-gray-500">
+                      {selectedDocData.extractedText.length.toLocaleString()} caracteres
+                    </p>
+                  </div>
+                )}
+
+                {selectedDocData.hasFile && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-900/20">
+                    <p className="text-sm text-amber-700 dark:text-amber-400">
+                      Este documento fue creado desde un archivo. El contenido extraído no se puede editar directamente.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="mt-6 flex gap-3">
@@ -1338,7 +1395,7 @@ export default function ContainerDetailPage() {
                 <Button
                   className="flex-1"
                   onClick={handleUpdateDocument}
-                  disabled={!selectedDocData.title.trim() || updatingDoc}
+                  disabled={!selectedDocData.title.trim() || updatingDoc || loadingDocContent}
                 >
                   {updatingDoc ? (
                     <>

@@ -37,6 +37,7 @@ export interface DocumentSummary {
   id: string;
   title: string;
   description: string | null;
+  originalFileUrl: string | null;
   processingStatus: "PENDING" | "PROCESSING" | "READY" | "FAILED";
   flashcardsGenerated: boolean;
   questionsGenerated: boolean;

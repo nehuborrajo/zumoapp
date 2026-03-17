@@ -43,6 +43,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       id: doc.id,
       title: doc.title,
       description: doc.description,
+      originalFileUrl: doc.originalFileUrl,
       processingStatus: doc.processingStatus,
       flashcardsGenerated: doc.flashcardsGenerated,
       questionsGenerated: doc.questionsGenerated,
