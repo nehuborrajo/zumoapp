@@ -110,9 +110,15 @@ User también tiene:
 ### Gamificación
 | Endpoint | Método | Descripción |
 |----------|--------|-------------|
-| `/api/study-sessions` | GET, POST | Sesiones de estudio |
+| `/api/study-sessions` | GET, POST | Sesiones de estudio (actualiza weeklyXp en liga) |
 | `/api/achievements` | GET | Lista de logros con estado |
 | `/api/users/me` | GET, PATCH | Datos del usuario actual |
+
+### Ligas
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/leagues/current` | GET | Liga actual del usuario (auto-asigna si no tiene) |
+| `/api/cron/process-leagues` | POST | Job semanal para promociones/descensos (Vercel Cron) |
 
 ---
 
@@ -158,7 +164,29 @@ La página `/study` tiene 3 modos implementados:
 
 ### Monedas
 - Se ganan por bonus de precisión (70%+, 80%+, 90%+, 100%)
-- Se usan en la tienda (pendiente implementar)
+- Se usan en la tienda para comprar items
+
+### Tienda (Shop)
+- **Consumibles:** Streak Freeze, XP Boost (x2, x3), Coin Multiplier
+- **Temas:** Dark Pure, Ocean, Forest, Sunset, Neon, Gold
+- **Powerups:** Weekly Freeze, etc.
+- Items tienen propiedades dinámicas en JSON (`properties`)
+- API: `/api/shop` (GET items), `/api/shop/buy` (POST), `/api/shop/inventory` (GET), `/api/shop/use` (POST), `/api/shop/equip` (POST)
+
+### Ligas Semanales
+- **Máximo 30 usuarios** por liga
+- **6 tiers:** BRONZE → SILVER → GOLD → PLATINUM → DIAMOND → RUBY
+- **Ciclo semanal:** Lunes 00:00 UTC a Domingo 23:59 UTC
+- **Zonas:** Top 3 ascienden, últimos 3 descienden (ajustable para ligas pequeñas)
+- **Recompensas por posición:**
+  - 1º: 100 coins + 500 XP
+  - 2º: 75 coins + 350 XP
+  - 3º: 50 coins + 200 XP
+  - 4º-5º: 25/20 coins + 100/75 XP
+  - Resto: 10 coins + 25 XP
+- **Asignación lazy:** Usuario se une a liga al visitar `/leaderboard`
+- **weeklyXp:** Se actualiza automáticamente al completar sesiones de estudio
+- **Vercel Cron:** Procesa ligas cada lunes (requiere `CRON_SECRET` en env)
 
 ---
 
@@ -234,16 +262,24 @@ OPENAI_API_KEY=sk-...
 - [x] Upload de archivos PDF (Supabase Storage)
 - [x] OCR para PDFs escaneados (Tesseract.js)
 - [x] Edición de contenido de documentos de texto
+- [x] Tienda con items comprables (consumibles, temas, powerups)
+- [x] Ligas semanales funcionales (30 usuarios/liga, promoción/descenso, recompensas)
 
 ### Pendiente 📋
-- [ ] Tienda con items comprables
-- [ ] Avatar personalizable
-- [ ] Ligas semanales funcionales
+- [ ] Mascota/Avatar de la app (estilo Duo de Duolingo)
+- [ ] Avatar personalizable de usuarios
 - [ ] Sistema de amigos
 - [ ] Tutor IA conversacional (Premium)
 - [ ] Spaced repetition (SM-2)
 - [ ] Pagos con Stripe
 - [ ] Ads para usuarios free
+
+---
+
+## Preferencias de UI/UX
+
+- **Tarjetas de tienda:** Altura fija `h-56`, padding `p-4`, iconos `h-14 w-14` - compactas y uniformes
+- **Estilo general:** Limpio, moderno, con animaciones sutiles (Framer Motion)
 
 ---
 

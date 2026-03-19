@@ -34,6 +34,13 @@ model User {
   lastStudyDate   DateTime?
   streakFreezes   Int       @default(0)
 
+  // Active boosts
+  xpBoostUntil    DateTime?  // XP boost active until this time
+  xpBoostMultiplier Float    @default(1.0)
+
+  // Theme preference
+  selectedTheme   String    @default("default")
+
   // League info
   currentLeague   LeagueTier @default(BRONZE)
 
@@ -311,6 +318,7 @@ enum ShopCategory {
   AVATAR_BACKGROUND
   THEME
   POWERUP
+  CONSUMABLE
 }
 
 model UserInventory {

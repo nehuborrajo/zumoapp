@@ -1,0 +1,31 @@
+name: Process Weekly Leagues
+
+on:
+  schedule:
+    # Runs every Monday at 00:05 UTC (5 min buffer for safety)
+    - cron: '5 0 * * 1'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  process-leagues:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call League Processing API
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ secrets.APP_URL }}/api/cron/process-leagues" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "Response: $body"
+          echo "HTTP Status: $http_code"
+
+          if [ "$http_code" -ne 200 ]; then
+            echo "Error: API returned status $http_code"
+            exit 1
+          fi
+
+          echo "✅ Leagues processed successfully"

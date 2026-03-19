@@ -356,3 +356,139 @@ export const uploadAPI = {
     return response.json();
   },
 };
+
+// Shop types
+export interface ShopItem {
+  id: string;
+  category: "AVATAR_HEAD" | "AVATAR_BODY" | "AVATAR_ACCESSORY" | "AVATAR_BACKGROUND" | "THEME" | "POWERUP" | "CONSUMABLE";
+  name: string;
+  description: string | null;
+  imageUrl: string | null;
+  price: number;
+  isPremiumOnly: boolean;
+  isLimited: boolean;
+  availableUntil: string | null;
+  properties: Record<string, unknown>;
+  owned: boolean;
+  quantity: number;
+  isEquipped: boolean;
+}
+
+export interface ShopResponse {
+  items: ShopItem[];
+  userCoins: number;
+  isPremium: boolean;
+}
+
+export interface InventoryItem {
+  id: string;
+  itemId: string;
+  name: string;
+  description: string | null;
+  imageUrl: string | null;
+  category: string;
+  properties: Record<string, unknown>;
+  quantity: number;
+  isEquipped: boolean;
+  purchasedAt: string;
+}
+
+export interface InventoryResponse {
+  inventory: InventoryItem[];
+  streakFreezes: number;
+  xpBoostActive: boolean;
+  xpBoostUntil: string | null;
+  xpBoostMultiplier: number;
+  selectedTheme: string;
+}
+
+export interface BuyResponse {
+  success: boolean;
+  message: string;
+  newBalance: number;
+  item: {
+    id: string;
+    name: string;
+    category: string;
+  };
+}
+
+export interface UseItemResponse {
+  success: boolean;
+  message: string;
+  streakFreezes?: number;
+  xpBoostUntil?: string;
+  xpBoostMultiplier?: number;
+}
+
+export interface EquipResponse {
+  success: boolean;
+  message: string;
+  selectedTheme?: string;
+  themeColors?: Record<string, string>;
+  isEquipped?: boolean;
+}
+
+// Shop API
+export const shopAPI = {
+  getItems: () => fetchAPI<ShopResponse>("/api/shop"),
+
+  getInventory: () => fetchAPI<InventoryResponse>("/api/shop/inventory"),
+
+  buyItem: (itemId: string) =>
+    fetchAPI<BuyResponse>("/api/shop/buy", {
+      method: "POST",
+      body: JSON.stringify({ itemId }),
+    }),
+
+  useItem: (itemId: string) =>
+    fetchAPI<UseItemResponse>("/api/shop/use", {
+      method: "POST",
+      body: JSON.stringify({ itemId }),
+    }),
+
+  equipItem: (itemId: string) =>
+    fetchAPI<EquipResponse>("/api/shop/equip", {
+      method: "POST",
+      body: JSON.stringify({ itemId }),
+    }),
+};
+
+// League types
+export type LeagueTier = "BRONZE" | "SILVER" | "GOLD" | "PLATINUM" | "DIAMOND" | "RUBY";
+
+export interface LeagueParticipant {
+  position: number;
+  id: string;
+  userId: string;
+  username: string;
+  avatarUrl: string | null;
+  weeklyXp: number;
+  isCurrentUser: boolean;
+  zone: "promotion" | "safe" | "relegation";
+}
+
+export interface CurrentLeagueResponse {
+  league: {
+    id: string;
+    tier: LeagueTier;
+    tierName: string;
+    weekStartDate: string;
+    weekEndDate: string;
+    timeRemaining: string;
+  };
+  currentUser: {
+    position: number;
+    weeklyXp: number;
+  };
+  participants: LeagueParticipant[];
+  zones: {
+    promotionCount: number;
+    relegationStart: number;
+  };
+}
+
+// Leagues API
+export const leaguesAPI = {
+  getCurrent: () => fetchAPI<CurrentLeagueResponse>("/api/leagues/current"),
+};

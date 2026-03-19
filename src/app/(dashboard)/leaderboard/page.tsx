@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Button, Card, CardContent, Badge, Progress } from "@/components/ui";
+import { Button, Card, CardContent, Badge } from "@/components/ui";
 import {
   Trophy,
   Medal,
@@ -15,30 +15,23 @@ import {
   Flame,
   ChevronUp,
   ChevronDown,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { leagueTierColors } from "@/lib/utils";
+import { useLeague } from "@/hooks/useLeague";
+import { LeagueTier } from "@/lib/api";
 
-// Mock leaderboard data
-const leagueData = {
-  tier: "GOLD",
-  name: "Liga Oro",
-  weekEndsIn: "3 días",
-  participants: [
-    { rank: 1, name: "María G.", xp: 2450, avatar: "🦊", change: "up", isCurrentUser: false },
-    { rank: 2, name: "Carlos R.", xp: 2380, avatar: "🐺", change: "up", isCurrentUser: false },
-    { rank: 3, name: "Ana M.", xp: 2210, avatar: "🦁", change: "same", isCurrentUser: false },
-    { rank: 4, name: "Pedro S.", xp: 2100, avatar: "🐯", change: "down", isCurrentUser: false },
-    { rank: 5, name: "Tú", xp: 1980, avatar: "🐼", change: "up", isCurrentUser: true },
-    { rank: 6, name: "Laura P.", xp: 1850, avatar: "🐨", change: "down", isCurrentUser: false },
-    { rank: 7, name: "Diego L.", xp: 1720, avatar: "🦈", change: "same", isCurrentUser: false },
-    { rank: 8, name: "Sofía T.", xp: 1650, avatar: "🦋", change: "up", isCurrentUser: false },
-    { rank: 9, name: "Javier M.", xp: 1580, avatar: "🐸", change: "down", isCurrentUser: false },
-    { rank: 10, name: "Elena R.", xp: 1490, avatar: "🐰", change: "same", isCurrentUser: false },
-  ],
-  promotionZone: 3,
-  relegationZone: 8,
-};
+const leagueTiers: { name: string; tier: LeagueTier }[] = [
+  { name: "Bronce", tier: "BRONZE" },
+  { name: "Plata", tier: "SILVER" },
+  { name: "Oro", tier: "GOLD" },
+  { name: "Platino", tier: "PLATINUM" },
+  { name: "Diamante", tier: "DIAMOND" },
+  { name: "Rubí", tier: "RUBY" },
+];
 
+// Mock friends data (TODO: implement friends system)
 const friendsLeaderboard = [
   { rank: 1, name: "Carlos R.", xp: 5240, avatar: "🐺", streak: 15, level: 18 },
   { rank: 2, name: "Tú", xp: 4850, avatar: "🐼", streak: 7, level: 12, isCurrentUser: true },
@@ -47,18 +40,15 @@ const friendsLeaderboard = [
   { rank: 5, name: "Pedro S.", xp: 3450, avatar: "🐯", streak: 3, level: 10 },
 ];
 
-const leagueTiers = [
-  { name: "Bronce", tier: "BRONZE", minXp: 0 },
-  { name: "Plata", tier: "SILVER", minXp: 500 },
-  { name: "Oro", tier: "GOLD", minXp: 1500 },
-  { name: "Platino", tier: "PLATINUM", minXp: 3000 },
-  { name: "Diamante", tier: "DIAMOND", minXp: 5000 },
-  { name: "Rubí", tier: "RUBY", minXp: 10000 },
-];
+// Avatar emojis by position for users without avatar
+const avatarEmojis = ["🦊", "🐺", "🦁", "🐯", "🐼", "🐨", "🦈", "🦋", "🐸", "🐰", "🦉", "🐙"];
 
 export default function LeaderboardPage() {
   const [activeTab, setActiveTab] = useState<"league" | "friends">("league");
-  const colors = leagueTierColors[leagueData.tier];
+  const { league, currentUser, participants, zones, loading, error } = useLeague();
+
+  const currentTier = league?.tier || "BRONZE";
+  const colors = leagueTierColors[currentTier];
 
   const getRankIcon = (rank: number) => {
     if (rank === 1) return <Crown className="h-5 w-5 text-yellow-500" />;
@@ -67,11 +57,39 @@ export default function LeaderboardPage() {
     return <span className="text-sm font-bold text-gray-400">#{rank}</span>;
   };
 
-  const getChangeIcon = (change: string) => {
-    if (change === "up") return <ChevronUp className="h-4 w-4 text-green-500" />;
-    if (change === "down") return <ChevronDown className="h-4 w-4 text-red-500" />;
-    return <Minus className="h-4 w-4 text-gray-400" />;
+  const getNextTierName = () => {
+    const currentIndex = leagueTiers.findIndex((t) => t.tier === currentTier);
+    if (currentIndex < leagueTiers.length - 1) {
+      return leagueTiers[currentIndex + 1].name;
+    }
+    return null;
   };
+
+  const getPrevTierName = () => {
+    const currentIndex = leagueTiers.findIndex((t) => t.tier === currentTier);
+    if (currentIndex > 0) {
+      return leagueTiers[currentIndex - 1].name;
+    }
+    return null;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[400px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-[400px] flex-col items-center justify-center gap-4">
+        <AlertCircle className="h-12 w-12 text-red-500" />
+        <p className="text-lg font-medium">Error al cargar la liga</p>
+        <p className="text-gray-500">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -97,25 +115,38 @@ export default function LeaderboardPage() {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500">Tu liga actual</p>
-                  <h2 className={`text-2xl font-bold ${colors.text}`}>{leagueData.name}</h2>
-                  <p className="text-sm text-gray-500">La semana termina en {leagueData.weekEndsIn}</p>
+                  <h2 className={`text-2xl font-bold ${colors.text}`}>Liga {league?.tierName}</h2>
+                  <p className="text-sm text-gray-500">
+                    La semana termina en {league?.timeRemaining}
+                  </p>
                 </div>
               </div>
               <div className="text-right">
                 <p className="text-sm text-gray-500">Tu posición</p>
-                <p className="text-3xl font-bold">#5</p>
-                <Badge variant="success" size="sm" className="mt-1">
-                  <TrendingUp className="h-3 w-3" />
-                  +2 posiciones
+                <p className="text-3xl font-bold">#{currentUser?.position || "-"}</p>
+                <Badge
+                  variant={
+                    currentUser?.position && zones
+                      ? currentUser.position <= zones.promotionCount
+                        ? "success"
+                        : currentUser.position >= zones.relegationStart
+                        ? "danger"
+                        : "default"
+                      : "default"
+                  }
+                  size="sm"
+                  className="mt-1"
+                >
+                  {currentUser?.weeklyXp.toLocaleString() || 0} XP esta semana
                 </Badge>
               </div>
             </div>
 
             {/* League tiers */}
             <div className="mt-6 flex items-center justify-between">
-              {leagueTiers.map((tier, index) => {
+              {leagueTiers.map((tier) => {
                 const tierColors = leagueTierColors[tier.tier];
-                const isCurrentTier = tier.tier === leagueData.tier;
+                const isCurrentTier = tier.tier === currentTier;
                 return (
                   <div
                     key={tier.tier}
@@ -163,57 +194,87 @@ export default function LeaderboardPage() {
           {activeTab === "league" ? (
             <div className="divide-y divide-gray-100 dark:divide-gray-800">
               {/* Promotion zone indicator */}
-              <div className="bg-green-50 px-6 py-2 text-center text-sm font-medium text-green-600 dark:bg-green-900/20">
-                <TrendingUp className="mr-1 inline h-4 w-4" />
-                Zona de ascenso (Top {leagueData.promotionZone})
-              </div>
+              {zones && zones.promotionCount > 0 && (
+                <div className="bg-green-50 px-6 py-2 text-center text-sm font-medium text-green-600 dark:bg-green-900/20">
+                  <TrendingUp className="mr-1 inline h-4 w-4" />
+                  Zona de ascenso (Top {zones.promotionCount})
+                </div>
+              )}
 
-              {leagueData.participants.map((participant, index) => (
-                <motion.div
-                  key={participant.rank}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  className={`flex items-center justify-between px-6 py-4 ${
-                    participant.isCurrentUser
-                      ? "bg-indigo-50 dark:bg-indigo-900/20"
-                      : index >= leagueData.relegationZone - 1
-                      ? "bg-red-50/50 dark:bg-red-900/10"
-                      : ""
-                  }`}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="flex w-8 items-center justify-center">
-                      {getRankIcon(participant.rank)}
-                    </div>
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-xl dark:bg-gray-800">
-                      {participant.avatar}
-                    </div>
-                    <div>
-                      <p className={`font-semibold ${participant.isCurrentUser ? "text-indigo-600" : ""}`}>
-                        {participant.name}
-                        {participant.isCurrentUser && (
-                          <Badge variant="primary" size="sm" className="ml-2">
-                            Tú
-                          </Badge>
+              {participants.length === 0 ? (
+                <div className="px-6 py-8 text-center text-gray-500">
+                  <Trophy className="mx-auto mb-2 h-12 w-12 text-gray-300" />
+                  <p>Aún no hay participantes en esta liga</p>
+                  <p className="text-sm">¡Estudia para ser el primero!</p>
+                </div>
+              ) : (
+                participants.map((participant, index) => (
+                  <motion.div
+                    key={participant.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.03 }}
+                    className={`flex items-center justify-between px-6 py-4 ${
+                      participant.isCurrentUser
+                        ? "bg-indigo-50 dark:bg-indigo-900/20"
+                        : participant.zone === "relegation"
+                        ? "bg-red-50/50 dark:bg-red-900/10"
+                        : participant.zone === "promotion"
+                        ? "bg-green-50/50 dark:bg-green-900/10"
+                        : ""
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="flex w-8 items-center justify-center">
+                        {getRankIcon(participant.position)}
+                      </div>
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-xl dark:bg-gray-800">
+                        {participant.avatarUrl ? (
+                          <img
+                            src={participant.avatarUrl}
+                            alt={participant.username}
+                            className="h-10 w-10 rounded-full object-cover"
+                          />
+                        ) : (
+                          avatarEmojis[index % avatarEmojis.length]
                         )}
-                      </p>
+                      </div>
+                      <div>
+                        <p className={`font-semibold ${participant.isCurrentUser ? "text-indigo-600" : ""}`}>
+                          {participant.username}
+                          {participant.isCurrentUser && (
+                            <Badge variant="primary" size="sm" className="ml-2">
+                              Tú
+                            </Badge>
+                          )}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="font-bold">{participant.xp.toLocaleString()} XP</p>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <p className="font-bold">{participant.weeklyXp.toLocaleString()} XP</p>
+                      </div>
+                      {participant.zone === "promotion" && (
+                        <ChevronUp className="h-4 w-4 text-green-500" />
+                      )}
+                      {participant.zone === "relegation" && (
+                        <ChevronDown className="h-4 w-4 text-red-500" />
+                      )}
+                      {participant.zone === "safe" && (
+                        <Minus className="h-4 w-4 text-gray-400" />
+                      )}
                     </div>
-                    {getChangeIcon(participant.change)}
-                  </div>
-                </motion.div>
-              ))}
+                  </motion.div>
+                ))
+              )}
 
               {/* Relegation zone indicator */}
-              <div className="bg-red-50 px-6 py-2 text-center text-sm font-medium text-red-600 dark:bg-red-900/20">
-                <TrendingDown className="mr-1 inline h-4 w-4" />
-                Zona de descenso (Posición {leagueData.relegationZone}+)
-              </div>
+              {zones && participants.length >= 6 && (
+                <div className="bg-red-50 px-6 py-2 text-center text-sm font-medium text-red-600 dark:bg-red-900/20">
+                  <TrendingDown className="mr-1 inline h-4 w-4" />
+                  Zona de descenso (Posición {zones.relegationStart}+)
+                </div>
+              )}
             </div>
           ) : (
             <div className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -275,7 +336,9 @@ export default function LeaderboardPage() {
               <div>
                 <h3 className="font-semibold">Ascenso</h3>
                 <p className="text-sm text-gray-500">
-                  Los top 3 suben a Liga Platino
+                  {getNextTierName()
+                    ? `Los top ${zones?.promotionCount || 3} suben a Liga ${getNextTierName()}`
+                    : "¡Ya estás en la liga más alta!"}
                 </p>
               </div>
             </div>
@@ -290,7 +353,9 @@ export default function LeaderboardPage() {
               <div>
                 <h3 className="font-semibold">Descenso</h3>
                 <p className="text-sm text-gray-500">
-                  Los últimos 3 bajan a Liga Plata
+                  {getPrevTierName()
+                    ? `Los últimos 3 bajan a Liga ${getPrevTierName()}`
+                    : "¡Ya estás en la liga inicial!"}
                 </p>
               </div>
             </div>

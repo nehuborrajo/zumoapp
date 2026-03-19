@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { getWeekBoundaries } from "@/lib/leagues";
 
 // XP per correct answer by mode
 const XP_RATES = {
@@ -211,6 +212,9 @@ export async function POST(request: NextRequest) {
       }),
     ]);
 
+    // Update weekly XP in the league
+    await updateLeagueXp(user.id, xpEarned);
+
     // Check for new achievements
     const newAchievements = await checkAndUnlockAchievements(user.id, {
       totalXp: newTotalXp,
@@ -328,6 +332,40 @@ async function checkAndUnlockAchievements(
   }
 
   return unlockedAchievements;
+}
+
+// Update weekly XP in the user's league
+async function updateLeagueXp(userId: string, xpEarned: number) {
+  if (xpEarned <= 0) return;
+
+  try {
+    const { start: weekStart } = getWeekBoundaries();
+
+    // Find user's participation in current week's league
+    const participation = await prisma.leagueParticipant.findFirst({
+      where: {
+        userId,
+        league: {
+          weekStartDate: weekStart,
+        },
+      },
+    });
+
+    if (participation) {
+      // Update weekly XP
+      await prisma.leagueParticipant.update({
+        where: { id: participation.id },
+        data: {
+          weeklyXp: { increment: xpEarned },
+        },
+      });
+    }
+    // Note: If user has no league participation, they'll be assigned one
+    // when they visit the leaderboard page
+  } catch (error) {
+    // Log but don't fail the study session if league update fails
+    console.error("Error updating league XP:", error);
+  }
 }
 
 // GET /api/study-sessions - Get user's study sessions

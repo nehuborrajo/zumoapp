@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { motion } from "framer-motion";
-import { Button, Card, CardContent, CardHeader, CardTitle, Badge } from "@/components/ui";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Button, Card, CardContent, Badge } from "@/components/ui";
+import { shopAPI, type ShopItem } from "@/lib/api";
+import { useUser } from "@/contexts/UserContext";
 import {
   ShoppingBag,
   Coins,
@@ -10,61 +12,159 @@ import {
   Sparkles,
   Check,
   Lock,
-  Filter,
+  Loader2,
+  Flame,
+  Zap,
+  Palette,
+  Package,
+  X,
+  Play,
+  Clock,
 } from "lucide-react";
 
-// Mock shop data
-const categories = [
-  { id: "all", name: "Todo", icon: ShoppingBag },
-  { id: "avatar_head", name: "Cabeza", icon: "👒" },
-  { id: "avatar_body", name: "Ropa", icon: "👕" },
-  { id: "avatar_accessory", name: "Accesorios", icon: "🎒" },
-  { id: "avatar_background", name: "Fondos", icon: "🌅" },
-  { id: "powerup", name: "Power-ups", icon: "⚡" },
+type CategoryFilter = "all" | "CONSUMABLE" | "THEME" | "POWERUP";
+
+const categories: { id: CategoryFilter; name: string; icon: React.ReactNode }[] = [
+  { id: "all", name: "Todo", icon: <ShoppingBag className="h-4 w-4" /> },
+  { id: "CONSUMABLE", name: "Consumibles", icon: <Zap className="h-4 w-4" /> },
+  { id: "THEME", name: "Temas", icon: <Palette className="h-4 w-4" /> },
+  { id: "POWERUP", name: "Mejoras", icon: <Package className="h-4 w-4" /> },
 ];
 
-const shopItems = [
-  // Avatars - Head
-  { id: "1", name: "Gorro de Mago", category: "avatar_head", price: 150, image: "🧙", isPremiumOnly: false, owned: false },
-  { id: "2", name: "Corona Dorada", category: "avatar_head", price: 500, image: "👑", isPremiumOnly: true, owned: false },
-  { id: "3", name: "Gafas de Sol", category: "avatar_head", price: 100, image: "😎", isPremiumOnly: false, owned: true },
-  { id: "4", name: "Sombrero Pirata", category: "avatar_head", price: 200, image: "🏴‍☠️", isPremiumOnly: false, owned: false },
+const getItemIcon = (item: ShopItem): string => {
+  const props = item.properties as Record<string, unknown>;
+  const type = props.type as string;
 
-  // Avatars - Body
-  { id: "5", name: "Capa de Héroe", category: "avatar_body", price: 300, image: "🦸", isPremiumOnly: false, owned: false },
-  { id: "6", name: "Traje Espacial", category: "avatar_body", price: 450, image: "👨‍🚀", isPremiumOnly: true, owned: false },
-  { id: "7", name: "Uniforme Ninja", category: "avatar_body", price: 250, image: "🥷", isPremiumOnly: false, owned: false },
-
-  // Accessories
-  { id: "8", name: "Mochila Cohete", category: "avatar_accessory", price: 400, image: "🚀", isPremiumOnly: false, owned: false },
-  { id: "9", name: "Mascota Dragón", category: "avatar_accessory", price: 600, image: "🐉", isPremiumOnly: true, owned: false },
-  { id: "10", name: "Espada Láser", category: "avatar_accessory", price: 350, image: "⚔️", isPremiumOnly: false, owned: true },
-
-  // Backgrounds
-  { id: "11", name: "Espacio Exterior", category: "avatar_background", price: 200, image: "🌌", isPremiumOnly: false, owned: false },
-  { id: "12", name: "Bosque Mágico", category: "avatar_background", price: 200, image: "🌲", isPremiumOnly: false, owned: false },
-  { id: "13", name: "Ciudad Futurista", category: "avatar_background", price: 300, image: "🏙️", isPremiumOnly: true, owned: false },
-
-  // Power-ups
-  { id: "14", name: "Congelar Racha (1 día)", category: "powerup", price: 50, image: "❄️", isPremiumOnly: false, owned: false, quantity: 3 },
-  { id: "15", name: "XP Boost x2 (1 hora)", category: "powerup", price: 100, image: "⚡", isPremiumOnly: false, owned: false, quantity: 1 },
-  { id: "16", name: "Monedas x2 (1 día)", category: "powerup", price: 150, image: "💰", isPremiumOnly: false, owned: false, quantity: 0 },
-];
-
-const userCoins = 340;
-const isPremium = false;
+  if (type === "streak_freeze") return "❄️";
+  if (type === "xp_boost") {
+    const mult = props.multiplier as number;
+    return mult >= 3 ? "⚡" : "🚀";
+  }
+  if (type === "coin_multiplier") return "💰";
+  if (type === "weekly_freeze") return "🛡️";
+  if (item.category === "THEME") {
+    const themeId = props.themeId as string;
+    if (themeId === "dark-pure") return "🌑";
+    if (themeId === "ocean") return "🌊";
+    if (themeId === "forest") return "🌲";
+    if (themeId === "sunset") return "🌅";
+    if (themeId === "neon") return "💜";
+    if (themeId === "gold") return "✨";
+  }
+  return "🎁";
+};
 
 export default function ShopPage() {
-  const [selectedCategory, setSelectedCategory] = useState("all");
-  const [purchaseModal, setPurchaseModal] = useState<string | null>(null);
+  const { user, refetch: refetchUser } = useUser();
+  const [items, setItems] = useState<ShopItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>("all");
+  const [purchaseModal, setPurchaseModal] = useState<ShopItem | null>(null);
+  const [purchasing, setPurchasing] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const filteredItems = shopItems.filter(
+  // Active boosts state
+  const [xpBoostActive, setXpBoostActive] = useState(false);
+  const [xpBoostUntil, setXpBoostUntil] = useState<string | null>(null);
+  const [xpBoostMultiplier, setXpBoostMultiplier] = useState(1);
+  const [streakFreezes, setStreakFreezes] = useState(0);
+
+  useEffect(() => {
+    fetchShopData();
+  }, []);
+
+  const fetchShopData = async () => {
+    try {
+      setLoading(true);
+      const [shopData, inventoryData] = await Promise.all([
+        shopAPI.getItems(),
+        shopAPI.getInventory(),
+      ]);
+      console.log("Shop data:", shopData);
+      console.log("Inventory data:", inventoryData);
+      setItems(shopData.items);
+      setXpBoostActive(inventoryData.xpBoostActive);
+      setXpBoostUntil(inventoryData.xpBoostUntil);
+      setXpBoostMultiplier(inventoryData.xpBoostMultiplier);
+      setStreakFreezes(inventoryData.streakFreezes);
+    } catch (err) {
+      console.error("Error fetching shop:", err);
+      setErrorMessage(err instanceof Error ? err.message : "Error cargando tienda");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePurchase = async () => {
+    if (!purchaseModal) return;
+
+    try {
+      setPurchasing(true);
+      setErrorMessage(null);
+      const result = await shopAPI.buyItem(purchaseModal.id);
+      setSuccessMessage(result.message);
+      setPurchaseModal(null);
+      await Promise.all([fetchShopData(), refetchUser()]);
+
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Error al comprar");
+    } finally {
+      setPurchasing(false);
+    }
+  };
+
+  const handleUseItem = async (item: ShopItem) => {
+    try {
+      setErrorMessage(null);
+      const result = await shopAPI.useItem(item.id);
+      setSuccessMessage(result.message);
+      await fetchShopData();
+
+      if (result.xpBoostUntil) {
+        setXpBoostActive(true);
+        setXpBoostUntil(result.xpBoostUntil);
+        setXpBoostMultiplier(result.xpBoostMultiplier || 2);
+      }
+      if (result.streakFreezes !== undefined) {
+        setStreakFreezes(result.streakFreezes);
+      }
+
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Error al usar item");
+      setTimeout(() => setErrorMessage(null), 3000);
+    }
+  };
+
+  const handleEquipTheme = async (item: ShopItem) => {
+    try {
+      setErrorMessage(null);
+      const result = await shopAPI.equipItem(item.id);
+      setSuccessMessage(result.message);
+      await fetchShopData();
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Error al equipar tema");
+      setTimeout(() => setErrorMessage(null), 3000);
+    }
+  };
+
+  const filteredItems = items.filter(
     (item) => selectedCategory === "all" || item.category === selectedCategory
   );
 
-  const selectedItem = shopItems.find((item) => item.id === purchaseModal);
+  const canAfford = (price: number) => (user?.coins || 0) >= price;
 
-  const canAfford = (price: number) => userCoins >= price;
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -73,20 +173,86 @@ export default function ShopPage() {
         <div>
           <h1 className="text-2xl font-bold sm:text-3xl">Tienda</h1>
           <p className="mt-1 text-gray-600 dark:text-gray-400">
-            Personaliza tu avatar y consigue power-ups
+            Consigue power-ups y personaliza tu experiencia
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-xl bg-yellow-100 px-4 py-2 dark:bg-yellow-900/30">
           <Coins className="h-5 w-5 text-yellow-600" />
           <span className="text-lg font-bold text-yellow-700 dark:text-yellow-400">
-            {userCoins}
+            {user?.coins || 0}
           </span>
           <span className="text-sm text-yellow-600 dark:text-yellow-500">monedas</span>
         </div>
       </div>
 
+      {/* Success/Error Messages */}
+      <AnimatePresence>
+        {successMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="rounded-xl bg-green-100 p-4 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+          >
+            <Check className="mr-2 inline h-5 w-5" />
+            {successMessage}
+          </motion.div>
+        )}
+        {errorMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="rounded-xl bg-red-100 p-4 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+          >
+            <X className="mr-2 inline h-5 w-5" />
+            {errorMessage}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Active Boosts */}
+      {(xpBoostActive || streakFreezes > 0) && (
+        <Card className="border-indigo-200 bg-indigo-50/50 dark:border-indigo-800 dark:bg-indigo-900/20">
+          <CardContent className="p-4">
+            <h3 className="mb-3 font-semibold text-indigo-700 dark:text-indigo-400">
+              Tus beneficios activos
+            </h3>
+            <div className="flex flex-wrap gap-3">
+              {xpBoostActive && xpBoostUntil && (
+                <div className="flex items-center gap-2 rounded-lg bg-indigo-100 px-3 py-2 dark:bg-indigo-900/50">
+                  <Zap className="h-5 w-5 text-indigo-600" />
+                  <div>
+                    <span className="font-medium text-indigo-700 dark:text-indigo-300">
+                      XP Boost x{xpBoostMultiplier}
+                    </span>
+                    <div className="flex items-center gap-1 text-xs text-indigo-500">
+                      <Clock className="h-3 w-3" />
+                      Hasta {new Date(xpBoostUntil).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {streakFreezes > 0 && (
+                <div className="flex items-center gap-2 rounded-lg bg-cyan-100 px-3 py-2 dark:bg-cyan-900/50">
+                  <Flame className="h-5 w-5 text-cyan-600" />
+                  <div>
+                    <span className="font-medium text-cyan-700 dark:text-cyan-300">
+                      Streak Freezes
+                    </span>
+                    <div className="text-xs text-cyan-500">
+                      {streakFreezes} disponibles
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Premium banner */}
-      {!isPremium && (
+      {!user?.isPremium && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -106,7 +272,7 @@ export default function ShopPage() {
               </div>
               <Button
                 variant="secondary"
-                className="bg-white text-orange-600 hover:bg-orange-50"
+                className="hidden bg-white text-orange-600 hover:bg-orange-50 sm:flex"
               >
                 Ver planes
               </Button>
@@ -127,11 +293,7 @@ export default function ShopPage() {
                 : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
             }`}
           >
-            {typeof cat.icon === "string" ? (
-              <span>{cat.icon}</span>
-            ) : (
-              <cat.icon className="h-4 w-4" />
-            )}
+            {cat.icon}
             {cat.name}
           </button>
         ))}
@@ -140,7 +302,10 @@ export default function ShopPage() {
       {/* Items grid */}
       <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
         {filteredItems.map((item, index) => {
-          const canBuy = canAfford(item.price) && !item.owned && (!item.isPremiumOnly || isPremium);
+          const props = item.properties as Record<string, unknown>;
+          const isConsumable = item.category === "CONSUMABLE";
+          const isTheme = item.category === "THEME";
+          const canBuy = canAfford(item.price) && (!item.isPremiumOnly || user?.isPremium);
 
           return (
             <motion.div
@@ -150,12 +315,18 @@ export default function ShopPage() {
               transition={{ delay: index * 0.05 }}
             >
               <Card
-                className={`relative overflow-hidden transition-all ${
-                  item.owned
+                className={`relative h-56 overflow-hidden transition-all ${
+                  item.owned && !isConsumable
                     ? "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-900/20"
+                    : item.isEquipped
+                    ? "border-indigo-300 bg-indigo-50/50 dark:border-indigo-700 dark:bg-indigo-900/20"
                     : "card-hover cursor-pointer"
                 }`}
-                onClick={() => !item.owned && setPurchaseModal(item.id)}
+                onClick={() => {
+                  if (!item.owned || isConsumable) {
+                    setPurchaseModal(item);
+                  }
+                }}
               >
                 {/* Premium badge */}
                 {item.isPremiumOnly && (
@@ -164,62 +335,89 @@ export default function ShopPage() {
                   </div>
                 )}
 
-                {/* Owned badge */}
-                {item.owned && (
+                {/* Owned/Equipped badge */}
+                {item.owned && !isConsumable && (
                   <div className="absolute left-2 top-2">
-                    <Badge variant="success" size="sm">
+                    <Badge variant={item.isEquipped ? "default" : "success"} size="sm">
                       <Check className="h-3 w-3" />
-                      Obtenido
+                      {item.isEquipped ? "Equipado" : "Obtenido"}
                     </Badge>
                   </div>
                 )}
 
-                <CardContent className="p-6">
+                <CardContent className="flex h-full flex-col p-4">
                   {/* Item image */}
                   <div className="flex justify-center">
                     <div
-                      className={`flex h-20 w-20 items-center justify-center rounded-2xl text-5xl ${
-                        item.owned
+                      className={`flex h-14 w-14 items-center justify-center rounded-xl text-3xl ${
+                        item.owned && !isConsumable
                           ? "bg-green-100 dark:bg-green-900/30"
+                          : item.isEquipped
+                          ? "bg-indigo-100 dark:bg-indigo-900/30"
                           : "bg-gray-100 dark:bg-gray-800"
                       }`}
                     >
-                      {item.image}
+                      {getItemIcon(item)}
                     </div>
                   </div>
 
                   {/* Item info */}
-                  <div className="mt-4 text-center">
-                    <h3 className="font-semibold">{item.name}</h3>
-                    {item.quantity !== undefined && (
-                      <p className="text-sm text-gray-500">
+                  <div className="mt-2 flex-1 text-center">
+                    <h3 className="text-sm font-semibold">{item.name}</h3>
+                    {item.description && (
+                      <p className="mt-1 line-clamp-2 text-xs text-gray-500">
+                        {item.description}
+                      </p>
+                    )}
+                    {isConsumable && item.owned && (
+                      <p className="mt-1 text-xs font-medium text-indigo-600 dark:text-indigo-400">
                         Tienes: {item.quantity}
                       </p>
                     )}
                   </div>
 
-                  {/* Price */}
-                  {!item.owned && (
-                    <div className="mt-4 flex items-center justify-center gap-2">
-                      {item.isPremiumOnly && !isPremium ? (
-                        <Badge variant="warning">
-                          <Lock className="h-3 w-3" />
-                          Solo Premium
-                        </Badge>
-                      ) : (
-                        <div
-                          className={`flex items-center gap-1 rounded-lg px-3 py-1 ${
-                            canAfford(item.price)
-                              ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                              : "bg-gray-100 text-gray-400 dark:bg-gray-800"
-                          }`}
-                        >
-                          <Coins className="h-4 w-4" />
-                          <span className="font-bold">{item.price}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {/* Price or action */}
+                  <div className="mt-auto flex items-center justify-center gap-2 pt-2">
+                    {item.isPremiumOnly && !user?.isPremium ? (
+                      <Badge variant="warning">
+                        <Lock className="h-3 w-3" />
+                        Solo Premium
+                      </Badge>
+                    ) : item.owned && isTheme ? (
+                      <Button
+                        size="sm"
+                        variant={item.isEquipped ? "outline" : "default"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEquipTheme(item);
+                        }}
+                      >
+                        {item.isEquipped ? "Equipado" : "Equipar"}
+                      </Button>
+                    ) : item.owned && isConsumable && item.quantity > 0 ? (
+                      <Button
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUseItem(item);
+                        }}
+                      >
+                        <Play className="h-3 w-3" />
+                        Usar
+                      </Button>
+                    ) : (
+                      <div
+                        className={`flex items-center gap-1 rounded-lg px-3 py-1 ${
+                          canAfford(item.price)
+                            ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                            : "bg-gray-100 text-gray-400 dark:bg-gray-800"
+                        }`}
+                      >
+                        <Coins className="h-4 w-4" />
+                        <span className="font-bold">{item.price}</span>
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             </motion.div>
@@ -227,73 +425,92 @@ export default function ShopPage() {
         })}
       </div>
 
-      {/* Purchase Modal */}
-      {purchaseModal && selectedItem && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setPurchaseModal(null)}
-        >
-          <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
-            className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-900"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="text-center">
-              <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-2xl bg-gray-100 text-6xl dark:bg-gray-800">
-                {selectedItem.image}
-              </div>
-              <h2 className="mt-4 text-xl font-bold">{selectedItem.name}</h2>
-
-              {selectedItem.isPremiumOnly && !isPremium ? (
-                <>
-                  <p className="mt-2 text-gray-500">
-                    Este item es exclusivo para usuarios Premium
-                  </p>
-                  <Button className="mt-6 w-full" variant="premium">
-                    <Crown className="h-4 w-4" />
-                    Hazte Premium
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <div className="mt-4 flex items-center justify-center gap-2">
-                    <Coins className="h-5 w-5 text-yellow-500" />
-                    <span className="text-2xl font-bold">{selectedItem.price}</span>
-                  </div>
-
-                  {!canAfford(selectedItem.price) && (
-                    <p className="mt-2 text-sm text-red-500">
-                      No tienes suficientes monedas
-                    </p>
-                  )}
-
-                  <div className="mt-6 flex gap-3">
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => setPurchaseModal(null)}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button
-                      className="flex-1"
-                      disabled={!canAfford(selectedItem.price)}
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      Comprar
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
-          </motion.div>
-        </motion.div>
+      {filteredItems.length === 0 && (
+        <div className="py-12 text-center text-gray-500">
+          No hay items en esta categoría
+        </div>
       )}
+
+      {/* Purchase Modal */}
+      <AnimatePresence>
+        {purchaseModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={() => setPurchaseModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-900"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center">
+                <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-2xl bg-gray-100 text-6xl dark:bg-gray-800">
+                  {getItemIcon(purchaseModal)}
+                </div>
+                <h2 className="mt-4 text-xl font-bold">{purchaseModal.name}</h2>
+                {purchaseModal.description && (
+                  <p className="mt-2 text-sm text-gray-500">{purchaseModal.description}</p>
+                )}
+
+                {purchaseModal.isPremiumOnly && !user?.isPremium ? (
+                  <>
+                    <p className="mt-4 text-gray-500">
+                      Este item es exclusivo para usuarios Premium
+                    </p>
+                    <Button className="mt-6 w-full" variant="premium">
+                      <Crown className="h-4 w-4" />
+                      Hazte Premium
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <div className="mt-4 flex items-center justify-center gap-2">
+                      <Coins className="h-5 w-5 text-yellow-500" />
+                      <span className="text-2xl font-bold">{purchaseModal.price}</span>
+                    </div>
+
+                    {!canAfford(purchaseModal.price) && (
+                      <p className="mt-2 text-sm text-red-500">
+                        No tienes suficientes monedas (tienes {user?.coins || 0})
+                      </p>
+                    )}
+
+                    <div className="mt-6 flex gap-3">
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => setPurchaseModal(null)}
+                        disabled={purchasing}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        className="flex-1"
+                        disabled={!canAfford(purchaseModal.price) || purchasing}
+                        onClick={handlePurchase}
+                      >
+                        {purchasing ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Sparkles className="h-4 w-4" />
+                            Comprar
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
