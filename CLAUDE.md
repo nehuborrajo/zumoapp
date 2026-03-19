@@ -122,11 +122,17 @@ User también tiene:
 | `/api/leagues/current` | GET | Liga actual del usuario (auto-asigna si no tiene) |
 | `/api/cron/process-leagues` | POST | Job semanal para promociones/descensos (Vercel Cron) |
 
+### Tutor IA (Premium)
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/tutor/chat` | POST | Chat con IA con streaming (body: documentId/subjectId, messages, userMessage) |
+| `/api/tutor/session` | POST | Guardar sesión y calcular XP (body: documentId/subjectId, messageCount, durationSeconds) |
+
 ---
 
 ## Modos de Estudio
 
-La página `/study` tiene 3 modos implementados:
+La página `/study` tiene 4 modos implementados:
 
 1. **Flashcards** (10 XP/correcta)
    - Voltear tarjeta para ver respuesta
@@ -143,7 +149,14 @@ La página `/study` tiene 3 modos implementados:
    - Avance automático tras 1.8s
    - Muestra respuesta correcta si falla
 
-4. **Tutor IA** (Premium, pendiente)
+4. **Tutor IA** (Premium)
+   - Chat conversacional con IA sobre el material de estudio
+   - Respuestas en streaming para mejor UX
+   - Usa GPT-4o (modelo premium)
+   - XP: Base 10 + 5/mensaje + bonus tiempo (máx 100 XP)
+   - Mínimo 2 minutos para ganar XP
+   - Componentes: `TutorChat`, `TutorPremiumGate`, `TutorSessionCompleteModal`
+   - Hook: `useTutorChat.ts`
 
 ---
 
@@ -281,7 +294,7 @@ OPENAI_API_KEY=sk-...
 - [x] Modelo de datos completo (Prisma)
 - [x] CRUD de Cursos/Materias/Documentos
 - [x] Generación de flashcards/questions con OpenAI
-- [x] 3 modos de estudio (Flashcards, Quiz, V/F)
+- [x] 4 modos de estudio (Flashcards, Quiz, V/F, Tutor IA)
 - [x] Sistema de XP, niveles, rachas
 - [x] Sistema de logros (13 logros)
 - [x] Página de perfil con stats reales
@@ -292,12 +305,12 @@ OPENAI_API_KEY=sk-...
 - [x] Tienda con items comprables (consumibles, temas, powerups)
 - [x] Ligas semanales funcionales (30 usuarios/liga, promoción/descenso, recompensas)
 - [x] Spaced repetition (SM-2) para flashcards
+- [x] Tutor IA conversacional (Premium) con streaming
 
 ### Pendiente 📋
 - [ ] Mascota/Avatar de la app (estilo Duo de Duolingo)
 - [ ] Avatar personalizable de usuarios
 - [ ] Sistema de amigos
-- [ ] Tutor IA conversacional (Premium)
 - [ ] Pagos con Stripe
 - [ ] Ads para usuarios free
 

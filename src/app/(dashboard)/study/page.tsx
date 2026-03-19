@@ -8,7 +8,8 @@ import { Button, Card, CardContent, Badge, Progress } from "@/components/ui";
 import { useCourses, useCourse } from "@/hooks/useCourses";
 import { useFlashcards, useQuestions } from "@/hooks/useFlashcards";
 import { useUser } from "@/hooks/useUser";
-import { studySessionsAPI, flashcardsAPI, type Flashcard, type Question, type StudySessionResult } from "@/lib/api";
+import { studySessionsAPI, flashcardsAPI, type Flashcard, type Question, type StudySessionResult, type TutorSessionResult } from "@/lib/api";
+import { TutorChat, TutorPremiumGate, TutorSessionCompleteModal } from "@/components/study/TutorChat";
 import { QUALITY_MAP } from "@/lib/sm2";
 import {
   BookOpen,
@@ -84,7 +85,7 @@ function StudyPageContent() {
   const { courses, loading: coursesLoading } = useCourses();
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const { course: selectedCourseData, loading: courseLoading } = useCourse(selectedCourseId);
-  const { refetch: refetchUser } = useUser();
+  const { refetch: refetchUser, user } = useUser();
 
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
@@ -104,6 +105,7 @@ function StudyPageContent() {
   // Session tracking
   const sessionStartTime = useRef<number>(0);
   const [sessionResult, setSessionResult] = useState<StudySessionResult | null>(null);
+  const [tutorSessionResult, setTutorSessionResult] = useState<TutorSessionResult | null>(null);
   const [savingSession, setSavingSession] = useState(false);
 
   // Check for documents param in URL
@@ -165,6 +167,12 @@ function StudyPageContent() {
     const canStart = (selectedSubject || selectedDocumentIds.length > 0) && selectedMode;
 
     if (canStart) {
+      // Tutor mode doesn't need flashcards/questions - it uses document text
+      if (selectedMode === "tutor") {
+        setIsStudying(true);
+        return;
+      }
+
       let items: (Flashcard | Question)[] = [];
 
       if (selectedMode === "flashcards") {
@@ -242,6 +250,7 @@ function StudyPageContent() {
     setShuffledItems([]);
     setCurrentItems([]);
     setSessionResult(null);
+    setTutorSessionResult(null);
   };
 
   // Save session to database
@@ -305,6 +314,49 @@ function StudyPageContent() {
       saveSession(sessionStats);
     }
   }, [isSessionComplete, sessionResult, savingSession, sessionStats]);
+
+  // Get context title for tutor mode
+  const selectedSubjectName = selectedCourseData?.subjects.find(
+    (s: { id: string; name: string }) => s.id === selectedSubject
+  )?.name;
+  const tutorContextTitle = selectedSubjectName
+    ? `${selectedCourseData?.name} - ${selectedSubjectName}`
+    : selectedCourseData?.name || "Material de estudio";
+
+  // Study session view - Tutor IA mode
+  if (isStudying && selectedMode === "tutor") {
+    // Check premium status
+    if (!user?.isPremium) {
+      return <TutorPremiumGate onBack={endSession} />;
+    }
+
+    // Show session complete modal if we have a result
+    if (tutorSessionResult) {
+      return (
+        <TutorSessionCompleteModal
+          result={tutorSessionResult}
+          onEnd={endSession}
+        />
+      );
+    }
+
+    return (
+      <TutorChat
+        documentId={selectedDocumentIds[0]}
+        subjectId={selectedSubject || undefined}
+        contextTitle={tutorContextTitle}
+        onEndSession={async (result) => {
+          if (result) {
+            setTutorSessionResult(result);
+            await refetchUser();
+          } else {
+            endSession();
+          }
+        }}
+        onBack={endSession}
+      />
+    );
+  }
 
   // Study session view - Flashcards mode
   if (isStudying && selectedMode === "flashcards") {
@@ -1053,7 +1105,10 @@ function StudyPageContent() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {studyModes.map((mode, index) => {
               const count = getAvailableCount(mode.id);
-              const isDisabled = mode.premium || count === 0;
+              // Tutor mode is enabled for premium users (doesn't need flashcard count)
+              const isTutorMode = mode.id === "tutor";
+              const isPremiumLocked = mode.premium && !user?.isPremium;
+              const isDisabled = isTutorMode ? isPremiumLocked : (count === 0);
 
               return (
                 <motion.div
@@ -1072,9 +1127,14 @@ function StudyPageContent() {
                     } ${mode.premium ? "relative overflow-hidden" : ""}`}
                     onClick={() => !isDisabled && setSelectedMode(mode.id)}
                   >
-                    {mode.premium && (
+                    {mode.premium && !user?.isPremium && (
                       <div className="absolute right-0 top-0 rounded-bl-xl bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-1 text-xs font-semibold text-white">
                         PRO
+                      </div>
+                    )}
+                    {mode.premium && user?.isPremium && (
+                      <div className="absolute right-0 top-0 rounded-bl-xl bg-gradient-to-r from-green-500 to-emerald-500 px-3 py-1 text-xs font-semibold text-white">
+                        ✓ PRO
                       </div>
                     )}
                     <CardContent className="p-6 text-center">
@@ -1159,7 +1219,11 @@ function StudyPageContent() {
       >
         <Button
           size="xl"
-          disabled={(!selectedSubject && selectedDocumentIds.length === 0) || !selectedMode || getAvailableCount(selectedMode || "") === 0}
+          disabled={
+            (!selectedSubject && selectedDocumentIds.length === 0) ||
+            !selectedMode ||
+            (selectedMode !== "tutor" && getAvailableCount(selectedMode || "") === 0)
+          }
           onClick={startStudy}
         >
           <Zap className="h-5 w-5" />

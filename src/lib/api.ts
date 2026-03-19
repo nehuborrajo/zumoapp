@@ -535,3 +535,49 @@ export interface CurrentLeagueResponse {
 export const leaguesAPI = {
   getCurrent: () => fetchAPI<CurrentLeagueResponse>("/api/leagues/current"),
 };
+
+// Tutor types
+export interface TutorMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface TutorSessionResult {
+  session: {
+    id: string;
+    xpEarned: number;
+    coinsEarned: number;
+    messageCount: number;
+    durationSeconds: number;
+  };
+  user: {
+    totalXp: number;
+    level: number;
+    leveledUp: boolean;
+    currentStreak: number;
+    streakIncreased: boolean;
+  };
+  achievements: Array<{
+    code: string;
+    name: string;
+    description: string;
+    rewardXp: number;
+    rewardCoins: number;
+    rarity: string;
+  }>;
+}
+
+// Tutor API
+export const tutorAPI = {
+  endSession: (params: {
+    documentId?: string;
+    subjectId?: string;
+    messageCount: number;
+    durationSeconds: number;
+  }) =>
+    fetchAPI<TutorSessionResult>("/api/tutor/session", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
+};
