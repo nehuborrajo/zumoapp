@@ -232,6 +232,26 @@ export interface Question {
   createdAt: string;
 }
 
+// SM-2 update response
+export interface SM2UpdateResponse {
+  success: boolean;
+  flashcard: {
+    id: string;
+    easeFactor: number;
+    interval: number;
+    repetitions: number;
+    nextReviewAt: string | null;
+  };
+}
+
+// Due flashcards response
+export interface DueFlashcardsResponse {
+  flashcards: Flashcard[];
+  totalDue: number;
+  limit: number;
+  hasMore: boolean;
+}
+
 // Flashcards API
 export const flashcardsAPI = {
   getForDocument: (documentId: string) =>
@@ -246,6 +266,29 @@ export const flashcardsAPI = {
     );
     return results.flat();
   },
+
+  // Get flashcards due for review (SM-2)
+  getDue: (params: { subjectId?: string; documentIds?: string[]; limit?: number }) => {
+    const queryParts: string[] = [];
+    if (params.subjectId) {
+      queryParts.push(`subjectId=${params.subjectId}`);
+    }
+    if (params.documentIds && params.documentIds.length > 0) {
+      queryParts.push(`documentIds=${params.documentIds.join(",")}`);
+    }
+    if (params.limit) {
+      queryParts.push(`limit=${params.limit}`);
+    }
+    const query = queryParts.length > 0 ? `?${queryParts.join("&")}` : "";
+    return fetchAPI<DueFlashcardsResponse>(`/api/flashcards/due${query}`);
+  },
+
+  // Update flashcard with SM-2 algorithm after user response
+  updateSM2: (flashcardId: string, quality: number) =>
+    fetchAPI<SM2UpdateResponse>(`/api/flashcards/${flashcardId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ quality }),
+    }),
 };
 
 // Questions API

@@ -8,7 +8,8 @@ import { Button, Card, CardContent, Badge, Progress } from "@/components/ui";
 import { useCourses, useCourse } from "@/hooks/useCourses";
 import { useFlashcards, useQuestions } from "@/hooks/useFlashcards";
 import { useUser } from "@/hooks/useUser";
-import { studySessionsAPI, type Flashcard, type Question, type StudySessionResult } from "@/lib/api";
+import { studySessionsAPI, flashcardsAPI, type Flashcard, type Question, type StudySessionResult } from "@/lib/api";
+import { QUALITY_MAP } from "@/lib/sm2";
 import {
   BookOpen,
   ArrowRight,
@@ -29,6 +30,8 @@ import {
   TrendingUp,
   Coins,
   Gift,
+  Sparkles,
+  Clock,
 } from "lucide-react";
 
 const studyModes = [
@@ -86,6 +89,7 @@ function StudyPageContent() {
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [selectedMode, setSelectedMode] = useState<string | null>(null);
+  const [studyType, setStudyType] = useState<"all" | "due">("all"); // "all" = all flashcards, "due" = smart review (SM-2)
   const [isStudying, setIsStudying] = useState(false);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
@@ -114,6 +118,7 @@ function StudyPageContent() {
   }, [searchParams]);
 
   // Fetch flashcards and questions for selected subject OR documents
+  // When studyType is "due", we fetch due flashcards separately during startStudy
   const { flashcards, loading: flashcardsLoading } = useFlashcards(
     selectedDocumentIds.length > 0
       ? { documentIds: selectedDocumentIds }
@@ -123,6 +128,18 @@ function StudyPageContent() {
     selectedDocumentIds.length > 0
       ? { documentIds: selectedDocumentIds }
       : selectedSubject
+  );
+
+  // For smart review mode, fetch due flashcards count
+  const { flashcards: dueFlashcards, loading: dueLoading, totalDue } = useFlashcards(
+    (selectedSubject || selectedDocumentIds.length > 0)
+      ? {
+          subjectId: selectedSubject || undefined,
+          documentIds: selectedDocumentIds.length > 0 ? selectedDocumentIds : undefined,
+          dueOnly: true,
+          limit: 50,
+        }
+      : null
   );
 
   // Filter questions by type for different modes
@@ -151,7 +168,8 @@ function StudyPageContent() {
       let items: (Flashcard | Question)[] = [];
 
       if (selectedMode === "flashcards") {
-        items = flashcards;
+        // Use due flashcards for smart review, or all flashcards otherwise
+        items = studyType === "due" ? dueFlashcards : flashcards;
       } else if (selectedMode === "quiz") {
         items = multipleChoiceQuestions;
       } else if (selectedMode === "truefalse") {
@@ -159,7 +177,11 @@ function StudyPageContent() {
       }
 
       if (items.length === 0) {
-        alert("No hay contenido disponible para este modo de estudio");
+        if (selectedMode === "flashcards" && studyType === "due") {
+          alert("¡Bien hecho! No tienes tarjetas pendientes de repaso.");
+        } else {
+          alert("No hay contenido disponible para este modo de estudio");
+        }
         return;
       }
 
@@ -188,12 +210,35 @@ function StudyPageContent() {
     }
   };
 
+  // Handle flashcard answer with SM-2 update
+  const handleFlashcardAnswer = async (flashcardId: string, quality: number) => {
+    // Update SM-2 data in backend (fire and forget - don't block UI)
+    flashcardsAPI.updateSM2(flashcardId, quality).catch((err) => {
+      console.error("Error updating flashcard SM-2:", err);
+    });
+
+    // Update local stats
+    const correct = quality >= 3; // SM-2: quality >= 3 is correct
+    setSessionStats((prev) => ({
+      correct: prev.correct + (correct ? 1 : 0),
+      incorrect: prev.incorrect + (correct ? 0 : 1),
+      total: prev.total + 1,
+    }));
+
+    // Advance to next card
+    setShowAnswer(false);
+    if (currentCardIndex < shuffledItems.length - 1) {
+      setCurrentCardIndex((prev) => prev + 1);
+    }
+  };
+
   const endSession = () => {
     setIsStudying(false);
     setSelectedCourseId(null);
     setSelectedSubject(null);
     setSelectedDocumentIds([]);
     setSelectedMode(null);
+    setStudyType("all");
     setShuffledItems([]);
     setCurrentItems([]);
     setSessionResult(null);
@@ -243,7 +288,10 @@ function StudyPageContent() {
 
   // Get available content count for each mode
   const getAvailableCount = (mode: string) => {
-    if (mode === "flashcards") return flashcards.length;
+    if (mode === "flashcards") {
+      // When flashcards mode is selected, show count based on studyType
+      return studyType === "due" ? (totalDue || 0) : flashcards.length;
+    }
     if (mode === "quiz") return multipleChoiceQuestions.length;
     if (mode === "truefalse") return trueFalseQuestions.length;
     return 0;
@@ -275,6 +323,12 @@ function StudyPageContent() {
             Salir
           </button>
           <div className="flex items-center gap-4">
+            {studyType === "due" && (
+              <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                <Sparkles className="h-3 w-3" />
+                Repaso SM-2
+              </Badge>
+            )}
             <Badge variant="xp">
               <Star className="h-3 w-3" />
               +{sessionStats.correct * 10} XP
@@ -361,7 +415,7 @@ function StudyPageContent() {
               variant="outline"
               size="lg"
               className="border-red-200 text-red-600 hover:bg-red-50"
-              onClick={() => handleAnswer(false)}
+              onClick={() => handleFlashcardAnswer(currentCard.id, QUALITY_MAP.again)}
             >
               <XCircle className="h-5 w-5" />
               No lo sabía
@@ -370,7 +424,7 @@ function StudyPageContent() {
               variant="outline"
               size="lg"
               className="border-yellow-200 text-yellow-600 hover:bg-yellow-50"
-              onClick={() => handleAnswer(true)}
+              onClick={() => handleFlashcardAnswer(currentCard.id, QUALITY_MAP.hard)}
             >
               <HelpCircle className="h-5 w-5" />
               Más o menos
@@ -378,7 +432,7 @@ function StudyPageContent() {
             <Button
               size="lg"
               variant="success"
-              onClick={() => handleAnswer(true)}
+              onClick={() => handleFlashcardAnswer(currentCard.id, QUALITY_MAP.easy)}
             >
               <CheckCircle className="h-5 w-5" />
               ¡Lo sabía!
@@ -1038,6 +1092,61 @@ function StudyPageContent() {
               );
             })}
           </div>
+        )}
+
+        {/* Study type toggle for flashcards mode */}
+        {selectedMode === "flashcards" && (selectedSubject || selectedDocumentIds.length > 0) && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-6"
+          >
+            <p className="mb-3 text-sm font-medium text-gray-600 dark:text-gray-400">
+              Tipo de sesión:
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setStudyType("all")}
+                className={`flex-1 flex items-center justify-center gap-2 rounded-xl border-2 p-4 transition-all ${
+                  studyType === "all"
+                    ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20"
+                    : "border-gray-200 hover:border-indigo-300 dark:border-gray-700"
+                }`}
+              >
+                <BookOpen className={`h-5 w-5 ${studyType === "all" ? "text-indigo-500" : "text-gray-500"}`} />
+                <div className="text-left">
+                  <p className={`font-medium ${studyType === "all" ? "text-indigo-700 dark:text-indigo-300" : ""}`}>
+                    Todas las tarjetas
+                  </p>
+                  <p className="text-xs text-gray-500">{flashcards.length} disponibles</p>
+                </div>
+              </button>
+              <button
+                onClick={() => setStudyType("due")}
+                className={`flex-1 flex items-center justify-center gap-2 rounded-xl border-2 p-4 transition-all ${
+                  studyType === "due"
+                    ? "border-purple-500 bg-purple-50 dark:bg-purple-900/20"
+                    : "border-gray-200 hover:border-purple-300 dark:border-gray-700"
+                }`}
+              >
+                <Sparkles className={`h-5 w-5 ${studyType === "due" ? "text-purple-500" : "text-gray-500"}`} />
+                <div className="text-left">
+                  <p className={`font-medium ${studyType === "due" ? "text-purple-700 dark:text-purple-300" : ""}`}>
+                    Repaso inteligente
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {dueLoading ? "..." : `${totalDue || 0} pendientes`}
+                  </p>
+                </div>
+              </button>
+            </div>
+            {studyType === "due" && (totalDue || 0) === 0 && !dueLoading && (
+              <p className="mt-2 text-xs text-green-600 flex items-center gap-1">
+                <CheckCircle className="h-3 w-3" />
+                ¡No tienes tarjetas pendientes de repaso!
+              </p>
+            )}
+          </motion.div>
         )}
       </div>
 

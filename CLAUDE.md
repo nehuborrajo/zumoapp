@@ -106,6 +106,8 @@ User también tiene:
 | `/api/documents/[documentId]/generate` | POST | Generar flashcards/questions con IA |
 | `/api/documents/[documentId]/flashcards` | GET | Flashcards del documento |
 | `/api/documents/[documentId]/questions` | GET | Questions del documento |
+| `/api/flashcards/[flashcardId]` | GET, PATCH | Flashcard individual (PATCH actualiza SM-2) |
+| `/api/flashcards/due` | GET | Flashcards pendientes de repaso (SM-2) |
 
 ### Gamificación
 | Endpoint | Método | Descripción |
@@ -129,6 +131,7 @@ La página `/study` tiene 3 modos implementados:
 1. **Flashcards** (10 XP/correcta)
    - Voltear tarjeta para ver respuesta
    - Botones: "No lo sabía", "Más o menos", "¡Lo sabía!"
+   - **Repaso inteligente (SM-2):** Opción para estudiar solo tarjetas pendientes de repaso
 
 2. **Quiz** (15 XP/correcta)
    - Preguntas de opción múltiple (MULTIPLE_CHOICE)
@@ -141,6 +144,30 @@ La página `/study` tiene 3 modos implementados:
    - Muestra respuesta correcta si falla
 
 4. **Tutor IA** (Premium, pendiente)
+
+---
+
+## Spaced Repetition (SM-2)
+
+El algoritmo SM-2 optimiza cuándo repasar cada flashcard basándose en la calidad de respuesta.
+
+### Implementación
+- **Algoritmo:** `src/lib/sm2.ts`
+- **API PATCH:** `/api/flashcards/[flashcardId]` - actualiza SM-2 tras respuesta
+- **API GET:** `/api/flashcards/due` - obtiene flashcards pendientes de repaso
+
+### Mapeo de botones a calidad SM-2
+| Botón | Calidad | Resultado |
+|-------|---------|-----------|
+| "No lo sabía" | 1 | Incorrecto - reinicia repeticiones, interval=1 |
+| "Más o menos" | 3 | Correcto difícil - incrementa interval |
+| "¡Lo sabía!" | 5 | Perfecto - incrementa interval exponencialmente |
+
+### Campos de Flashcard (Prisma)
+- `easeFactor`: Factor de facilidad (default 2.5, mín 1.3)
+- `interval`: Días hasta próximo repaso
+- `repetitions`: Repeticiones correctas consecutivas
+- `nextReviewAt`: Fecha del próximo repaso
 
 ---
 
@@ -264,13 +291,13 @@ OPENAI_API_KEY=sk-...
 - [x] Edición de contenido de documentos de texto
 - [x] Tienda con items comprables (consumibles, temas, powerups)
 - [x] Ligas semanales funcionales (30 usuarios/liga, promoción/descenso, recompensas)
+- [x] Spaced repetition (SM-2) para flashcards
 
 ### Pendiente 📋
 - [ ] Mascota/Avatar de la app (estilo Duo de Duolingo)
 - [ ] Avatar personalizable de usuarios
 - [ ] Sistema de amigos
 - [ ] Tutor IA conversacional (Premium)
-- [ ] Spaced repetition (SM-2)
 - [ ] Pagos con Stripe
 - [ ] Ads para usuarios free
 

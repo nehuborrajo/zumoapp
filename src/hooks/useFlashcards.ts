@@ -6,18 +6,57 @@ import { flashcardsAPI, questionsAPI, type Flashcard, type Question } from "@/li
 interface UseFlashcardsOptions {
   subjectId?: string | null;
   documentIds?: string[];
+  dueOnly?: boolean; // If true, only fetch flashcards due for review (SM-2)
+  limit?: number; // Limit for due flashcards (default 20)
 }
 
-export function useFlashcards(options: UseFlashcardsOptions | string | null) {
+interface UseFlashcardsResult {
+  flashcards: Flashcard[];
+  loading: boolean;
+  error: string | null;
+  refetch: () => Promise<void>;
+  totalDue?: number; // Total due flashcards (only when dueOnly is true)
+  hasMore?: boolean; // Whether there are more due flashcards
+}
+
+export function useFlashcards(options: UseFlashcardsOptions | string | null): UseFlashcardsResult {
   const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [totalDue, setTotalDue] = useState<number | undefined>(undefined);
+  const [hasMore, setHasMore] = useState<boolean | undefined>(undefined);
 
   // Normalize options
   const subjectId = typeof options === "string" ? options : options?.subjectId;
   const documentIds = typeof options === "object" && options !== null ? options.documentIds : undefined;
+  const dueOnly = typeof options === "object" && options !== null ? options.dueOnly : undefined;
+  const limit = typeof options === "object" && options !== null ? options.limit : undefined;
 
   const fetchFlashcards = useCallback(async () => {
+    // If dueOnly, use the due endpoint
+    if (dueOnly) {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await flashcardsAPI.getDue({
+          subjectId: subjectId || undefined,
+          documentIds: documentIds,
+          limit: limit,
+        });
+        setFlashcards(response.flashcards);
+        setTotalDue(response.totalDue);
+        setHasMore(response.hasMore);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to fetch due flashcards");
+        setFlashcards([]);
+        setTotalDue(undefined);
+        setHasMore(undefined);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     // If documentIds provided, fetch from multiple documents
     if (documentIds && documentIds.length > 0) {
       try {
@@ -25,6 +64,8 @@ export function useFlashcards(options: UseFlashcardsOptions | string | null) {
         setError(null);
         const data = await flashcardsAPI.getForDocuments(documentIds);
         setFlashcards(data);
+        setTotalDue(undefined);
+        setHasMore(undefined);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to fetch flashcards");
         setFlashcards([]);
@@ -45,13 +86,15 @@ export function useFlashcards(options: UseFlashcardsOptions | string | null) {
       setError(null);
       const data = await flashcardsAPI.getForSubject(subjectId);
       setFlashcards(data);
+      setTotalDue(undefined);
+      setHasMore(undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch flashcards");
       setFlashcards([]);
     } finally {
       setLoading(false);
     }
-  }, [subjectId, documentIds?.join(",")]);
+  }, [subjectId, documentIds?.join(","), dueOnly, limit]);
 
   useEffect(() => {
     fetchFlashcards();
@@ -62,6 +105,8 @@ export function useFlashcards(options: UseFlashcardsOptions | string | null) {
     loading,
     error,
     refetch: fetchFlashcards,
+    totalDue,
+    hasMore,
   };
 }
 
